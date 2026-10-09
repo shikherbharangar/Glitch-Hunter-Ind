@@ -36,7 +36,7 @@ In **Settings**, start with:
 - Cache lifetime: **360 minutes**.
 - Scanning enabled; alerts disabled until a destination is configured.
 
-Open **Discover** and queue one exact model or category. Check that a real successful request and listing leads appear. You can then queue starter categories or add a Watchlist. Paid request credits are visible in System health; failed attempts also consume the local request budget.
+Open **Results** and queue one exact model or category. Check that a real successful request and listing leads appear. You can then queue starter categories or add a Watchlist. Paid request credits are visible in System health; failed attempts also consume the local request budget.
 
 A new Render disk starts empty. This cloud instance’s leads, observations, queues and settings are not automatically copied to Render, and real credentials are never included in the repository. Do not upload a live SQLite main file without a consistent backup. If you want the existing cloud database transferred, arrange a consistent backup and keep it private.
 

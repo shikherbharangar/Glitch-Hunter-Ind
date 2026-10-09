@@ -23,7 +23,7 @@ In Settings, choose a request budget before enabling scans. A conservative start
 
 ## First session
 
-1. Open **Discover**. Queue a category or exact product model, or use **Queue starter categories** for broad coverage. Leads appear here as searches finish. Scheduled scanning must be enabled in Settings.
+1. Open **Results**. Queue a category or exact product model, or use **Queue starter categories** for broad coverage. Leads appear here as searches finish. Scheduled scanning must be enabled in Settings.
 2. Use **Watchlist** to monitor a query after cache expiry. Watchlists consume the same daily budget. Pause scans in Settings whenever needed.
 3. To record a real price yourself, open **Price evidence** and provide the full INR price in paise, exact variant, seller, availability, source and time. Manual input does not create trusted history or verified checkout.
 4. For page extraction, review the source website’s terms and approve its exact domain in Settings. In Discover, enter the exact URL and category, then queue extraction. Readable robots permission and complete, unambiguous product/offer data are required. Many pages will remain explicitly unverified.

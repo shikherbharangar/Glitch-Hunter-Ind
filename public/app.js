@@ -28,9 +28,10 @@ const human = (s) => String(s).replaceAll("_", " ").toLowerCase();
 const tag = (s, style = "") =>
   `<span class="tag ${style}">${esc(human(s))}</span>`;
 let state,
-  view = "radar",
+  view = "discover",
   filter = { text: "", market: "all", sort: "confidence" },
   toastTimer;
+const expandedPanels = new Set();
 async function api(path, method = "GET", body) {
   const r = await fetch("/api" + path, {
     method,
@@ -85,10 +86,10 @@ function radar() {
       "01 / THE ANOMALY DESK",
       "Price radar.",
       "Unusual prices, weighed against the evidence.",
-      `<a class="button primary" href="#discover">Open discovery <span>↗</span></a>`,
+      `<a class="button primary" href="#discover">View search results <span>↗</span></a>`,
     ) +
     `${state.providers[0].status === "credentials_missing" ? '<div class="notice warning"><span>AUTOMATION DISABLED / Firecrawl credentials are missing. Manual evidence and history remain available.</span><a href="#settings">Configure provider ↗</a></div>' : ""}<div class="summary-strip"><div class="readout"><small>Priority candidates</small><strong>${credible.length.toString().padStart(2, "0")}</strong><em>Severity + evidence thresholds</em></div><div class="readout"><small>Under observation</small><strong>${state.candidates.length.toString().padStart(2, "0")}</strong><em>Including manual review</em></div><div class="readout"><small>Discovered listings</small><strong>${state.coverage.listings.toString().padStart(2, "0")}</strong><em>Within current cache lifetime</em></div><div class="readout"><small>API budget today</small><strong>${state.usage.requests}<span class="muted"> / ${state.settings.dailyBudget}</span></strong><em>Actual requests / daily limit</em></div></div>
- <div class="section-line"><h2>Candidate ledger</h2><span>RANKING SCORES, NOT PROBABILITIES</span></div><div class="filters"><label class="sr-only" for="filter">Filter products</label><input id="filter" placeholder="Filter by product, model or category" value="${esc(filter.text)}"><label class="sr-only" for="market">Marketplace</label><select id="market"><option value="all">All marketplaces</option><option value="amazon" ${filter.market === "amazon" ? "selected" : ""}>Amazon India</option><option value="flipkart" ${filter.market === "flipkart" ? "selected" : ""}>Flipkart</option></select><label class="sr-only" for="sort">Sort candidates</label><select id="sort"><option value="confidence">Evidence first</option><option value="severity" ${filter.sort === "severity" ? "selected" : ""}>Severity first</option><option value="freshness" ${filter.sort === "freshness" ? "selected" : ""}>Newest first</option></select></div><div id="candidate-table">${candidateTable()}</div>
+ ${state.coverage.listings && !state.candidates.length ? `<div class="notice"><span>Your searches found ${state.coverage.listings} listing links. Open Search results to see them; Radar shows recorded price evidence.</span><a href="#discover">View results ↗</a></div>` : ""}<div class="section-line"><h2>Candidate ledger</h2><span>RANKING SCORES, NOT PROBABILITIES</span></div><div class="filters"><label class="sr-only" for="filter">Filter products</label><input id="filter" placeholder="Filter by product, model or category" value="${esc(filter.text)}"><label class="sr-only" for="market">Marketplace</label><select id="market"><option value="all">All marketplaces</option><option value="amazon" ${filter.market === "amazon" ? "selected" : ""}>Amazon India</option><option value="flipkart" ${filter.market === "flipkart" ? "selected" : ""}>Flipkart</option></select><label class="sr-only" for="sort">Sort candidates</label><select id="sort"><option value="confidence">Evidence first</option><option value="severity" ${filter.sort === "severity" ? "selected" : ""}>Severity first</option><option value="freshness" ${filter.sort === "freshness" ? "selected" : ""}>Newest first</option></select></div><div id="candidate-table">${candidateTable()}</div>
  <div class="below-grid"><section><div class="section-line"><h2>The verification protocol</h2><span>VIGIL / 0.1</span></div><ol class="protocol"><li><span>01</span><div>Identify the exact variant<small>Model, configuration, condition and bundle.</small></div></li><li><span>02</span><div>Question the price evidence<small>History, provenance and independent offers.</small></div></li><li><span>03</span><div>Verify before you act<small>A search result never confirms checkout.</small></div></li></ol></section><section><div class="section-line"><h2>Source availability</h2><a href="#health">Inspect ↗</a></div>${providers()}</section></div>`
   );
 }
@@ -129,20 +130,37 @@ function queryForm(id = "query-form") {
   return `<form id="${id}" class="panel inline-form"><label>Search query<input name="query" required minlength="3" maxlength="300" placeholder="A category, brand or exact model"></label><label>Category / label<input name="category" required maxlength="80" placeholder="Your research area"></label><button class="button primary" type="submit">${id === "watch-form" ? "Add monitor +" : "Queue search ↗"}</button></form>`;
 }
 function discover() {
+  const seen = new Set();
+  const results = state.discoveries.filter((r) => {
+    if (seen.has(r.url)) return false;
+    seen.add(r.url);
+    return true;
+  });
+  const pending = state.jobs.filter((j) =>
+    ["queued", "running", "retry"].includes(j.status),
+  ).length;
   return (
     heading(
-      "02 / SEARCH OPERATIONS",
-      "Expand the search.",
-      "Bounded product discovery across Amazon India, Flipkart and other public sources.",
-      button("Queue starter categories +", "seed"),
+      "02 / DISCOVER",
+      "Search results.",
+      "The listing links found by your searches. Open a listing to see the product and its current price.",
+      button("Refresh results ↻", "refresh-results"),
     ) +
-    `<div class="notice"><span>${state.settings.scanEnabled ? "SCANNING ENABLED" : "SCANNING PAUSED"} / Concurrency 1 · ${state.settings.intervalSeconds}s minimum interval · 20% exploration · ${state.settings.cacheMinutes}m cache</span><a href="#settings">Adjust budget ↗</a></div>${queryForm()}<form id="url-form" class="panel inline-form"><label>Exact product URL<input name="url" type="url" required placeholder="Public HTTPS listing URL"></label><label>Category<input name="category" required maxlength="80"></label><label>Fresh recheck<select name="recheck"><option value="false">Use recent record</option><option value="true">Request fresh page</option></select></label><button class="button">Queue permitted extraction ↗</button></form><p class="footnote">Approve domains in Settings after reviewing their collection terms. Each extraction uses the shared request budget, checks robots policy and preserves ambiguous evidence as unverified.</p><div class="section-line"><h2>Discovery coverage</h2><span>${state.coverage.queries} QUERY FAMILIES / ${state.coverage.listings} CURRENT LISTING LEADS</span></div><p class="footnote">Coverage reflects these queries only. Index results may be stale; snippets are never a verified price or historical baseline.</p>${state.discoveries.length ? state.discoveries.map((r) => `<article class="result-row"><div><div class="meta">${esc(r.marketplace.toUpperCase())} / ${esc(r.source_domain || "Unknown source")} / SEARCH RESULT OBSERVED</div><h3><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)} ↗</a></h3><p>${esc(r.description)}</p><div class="meta muted">Retrieved ${esc(stamp(r.observed_at))} · expires ${esc(stamp(r.expires_at))}</div></div><div class="row-actions"><button class="button small" data-action="watch-result" data-id="${r.id}">Monitor</button><button class="button small" data-action="extract-result" data-id="${r.id}">Extract page</button></div></article>`).join("") : empty("No listing leads collected.", "Queue a query and configure Firecrawl. Page extraction is opt-in for approved domains.")}<div class="section-line"><h2>Query queue</h2><span>RETRIES AND BUDGETS PERSIST ACROSS RESTARTS</span></div>${jobs()}${extractions()}`
+    `<section id="search-results" aria-label="Search results"><div class="section-line"><h2>${results.length} ${results.length === 1 ? "result" : "results"}</h2><span>${pending} SEARCHES WAITING OR RUNNING</span></div>
+    <p class="footnote">These are search matches, not confirmed price glitches. Prices have not been checked.</p>
+    ${results.length ? results.map((r) => `<article class="result-row"><div><div class="meta">${esc(r.source_domain || "Unknown website")} / ${esc(r.marketplace === "other" ? "Public website" : r.marketplace.toUpperCase())}</div><h3><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)} ↗</a></h3><p>${esc(r.description)}</p><div class="meta muted">Found ${esc(stamp(r.observed_at))} · Price not checked</div></div><div class="row-actions"><a class="button primary small" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a><button class="button small" data-action="watch-result" data-id="${r.id}">Monitor</button></div></article>`).join("") : empty("No results yet.", pending ? "Your searches are queued. Enable scanning in Settings, then refresh results after a search finishes." : "Add a search below to find product listing links.")}
+    </section>
+    <div class="section-line"><h2>Find more products</h2><span>${state.settings.scanEnabled ? "SCANNING ON" : "SCANNING PAUSED"} / <a href="#settings">Settings ↗</a></span></div>
+    ${queryForm()}${button("Queue starter categories +", "seed")}
+    <details id="price-check" class="panel"><summary>Check a product page for price evidence</summary><p>Review the website’s terms and approve its exact domain in Settings first. Ambiguous prices or variants stay unverified.</p><form id="url-form" class="inline-form"><label>Exact product URL<input name="url" type="url" required placeholder="Public HTTPS listing URL"></label><label>Category<input name="category" required maxlength="80"></label><label>Fresh recheck<select name="recheck"><option value="false">Use recent record</option><option value="true">Request fresh page</option></select></label><button class="button">Queue permitted extraction ↗</button></form></details>
+    <details id="search-activity" class="panel"><summary>Search activity · ${pending} pending</summary><p class="footnote">Queries, retries and cancellations. Results are shown above.</p>${jobs()}</details>
+    <details id="extraction-activity" class="panel"><summary>Page extraction activity</summary>${extractions()}</details>`
   );
 }
 function jobs() {
   return state.jobs.length
     ? `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>Query</th><th>Family</th><th>Status</th><th>Attempts</th><th>Next attempt</th><th>Action</th></tr></thead><tbody>${state.jobs.map((j) => `<tr><td class="product-title">${esc(j.query)}<small>${esc(j.category)}</small></td><td>${esc(j.family)}</td><td>${tag(j.status, j.error ? "warning" : "")}<br><small>${esc(j.error ? human(j.error) : "")}</small></td><td>${j.attempts}</td><td>${esc(stamp(j.run_at))}</td><td>${["queued", "retry", "running"].includes(j.status) ? `<button class="button small" data-action="cancel" data-id="${j.id}">Cancel</button>` : "—"}</td></tr>`).join("")}</tbody></table></div>`
-    : empty("Queue is empty.", "Use Discover to add a query.");
+    : empty("Queue is empty.", "Add a search on the Results page.");
 }
 function extractions() {
   return (
@@ -271,7 +289,7 @@ function login() {
     '<form id="login-form" class="panel inline-form"><label>Access token<input type="password" name="token" autocomplete="current-password" required></label><button class="button primary">Sign in</button></form>';
 }
 async function render() {
-  view = location.hash.slice(1) || "radar";
+  view = location.hash.slice(1) || "discover";
   document.querySelectorAll("nav a").forEach((a) => {
     const active =
       a.dataset.view === view ||
@@ -288,6 +306,9 @@ async function render() {
   main.innerHTML = renderer
     ? renderer()
     : empty("View not found.", "Use the workspace navigation.");
+  main.querySelectorAll("details[id]").forEach((panel) => {
+    panel.open = expandedPanels.has(panel.id);
+  });
 }
 async function load(requestedHash = location.hash) {
   state = await api("/state");
@@ -306,6 +327,16 @@ async function load(requestedHash = location.hash) {
     " IST";
   if (location.hash === requestedHash) await render();
 }
+main.addEventListener(
+  "toggle",
+  (e) => {
+    if (e.target.matches("details[id]")) {
+      if (e.target.open) expandedPanels.add(e.target.id);
+      else expandedPanels.delete(e.target.id);
+    }
+  },
+  true,
+);
 main.addEventListener("input", (e) => {
   if (e.target.id === "filter") {
     filter.text = e.target.value;
@@ -326,6 +357,8 @@ main.addEventListener("click", async (e) => {
   try {
     const id = el.dataset.id;
     switch (el.dataset.action) {
+      case "refresh-results":
+        break;
       case "seed":
         await api("/jobs/seed", "POST", {});
         toast(

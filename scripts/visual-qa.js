@@ -43,7 +43,7 @@ try {
           body: await r.text(),
         });
     });
-    await page.goto(origin);
+    await page.goto(origin + "/#radar");
     await page.getByRole("heading", { name: "Price radar." }).waitFor();
     await page.evaluate(() => document.fonts.ready);
     await page.keyboard.press("Tab");
@@ -109,7 +109,7 @@ try {
       await page
         .getByRole("heading", {
           name: {
-            discover: "Expand the search.",
+            discover: "Search results.",
             evidence: "Price evidence.",
             watchlist: "Keep watch.",
             health: "System health.",
@@ -154,10 +154,14 @@ try {
       .locator('#query-form [name="category"], #watch-form [name="category"]')
       .fill("SYNTHETIC QA");
     await page.getByRole("button", { name: "Queue search ↗" }).click();
+    await page.locator("#search-activity summary").click();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await page
       .getByRole("button", { name: "Cancel", exact: true })
       .waitFor({ state: "hidden" });
+    await page
+      .getByText("Check a product page for price evidence", { exact: true })
+      .click();
     await page
       .locator('#url-form [name="url"]')
       .fill("https://shop.example.com/products/synthetic");
@@ -166,6 +170,7 @@ try {
     await page
       .getByRole("button", { name: "Queue permitted extraction ↗" })
       .click();
+    await page.locator("#extraction-activity summary").click();
     await page.getByRole("button", { name: "Cancel extraction" }).click();
     await page
       .getByRole("cell", { name: "cancelled", exact: true })
@@ -236,6 +241,65 @@ try {
     fixture: "SYNTHETIC isolated temporary database",
   });
   await page.close();
+  for (const width of [1440, 390]) {
+    const resultsPage = await browser.newPage({
+      viewport: { width, height: 900 },
+    });
+    resultsPage.on("pageerror", (e) => errors.push(e.message));
+    await resultsPage.route("**/api/state", async (route) => {
+      const upstream = await route.fetch(),
+        data = await upstream.json();
+      const lead = {
+        id: 999,
+        url: "https://shop.example.com/products/telescope",
+        title: "SYNTHETIC QA telescope",
+        description: "Synthetic listing link for browser validation only.",
+        source_domain: "shop.example.com",
+        marketplace: "other",
+        observed_at: data.now,
+        expires_at: new Date(Date.now() + 3600000).toISOString(),
+      };
+      data.discoveries = [lead, { ...lead, id: 1000 }];
+      data.coverage.listings = 1;
+      await route.fulfill({ response: upstream, json: data });
+    });
+    await resultsPage.goto(origin);
+    await resultsPage
+      .getByRole("heading", { name: "Search results.", exact: true })
+      .waitFor();
+    assert.equal(
+      await resultsPage.locator("#search-results article").count(),
+      1,
+    );
+    assert.equal(
+      await resultsPage
+        .getByRole("link", { name: "Open listing ↗" })
+        .getAttribute("href"),
+      "https://shop.example.com/products/telescope",
+    );
+    const position = await resultsPage.evaluate(() => ({
+      result: document.querySelector("#search-results").getBoundingClientRect()
+        .top,
+      form: document.querySelector("#query-form").getBoundingClientRect().top,
+    }));
+    assert.ok(position.result < position.form);
+    assert.equal(
+      await resultsPage.locator("#search-activity").getAttribute("open"),
+      null,
+    );
+    await resultsPage.screenshot({
+      path: `artifacts/${width}-search-results.png`,
+      fullPage: true,
+    });
+    await resultsPage.close();
+  }
+  checks.push({
+    resultsFirst: true,
+    listingLink: true,
+    deduplicated: true,
+    viewports: 2,
+    fixture: "SYNTHETIC mocked search leads",
+  });
   for (const status of [
     "credentials_missing",
     "configured_unverified",
