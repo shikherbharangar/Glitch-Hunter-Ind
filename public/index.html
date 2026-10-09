@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#eeeee6" />
+    <title>Glitch Hunter India — Price forensics</title>
+    <link
+      rel="preload"
+      href="/fonts/PaperMono.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to evidence</a>
+    <div id="font-warning" class="notice warning" hidden>
+      Paper Mono failed to load. Check /fonts/PaperMono.woff2 and the browser
+      network log.
+    </div>
+    <header class="masthead">
+      <a class="brand" href="#radar" aria-label="Glitch Hunter India, Radar"
+        ><span class="brand-mark" aria-hidden="true">G<span>↗</span></span
+        ><span>GLITCH HUNTER<small>INDIA / PRICE FORENSICS</small></span></a
+      >
+      <div class="edition">
+        VIGIL / 0.1<span>OBSERVE. CORROBORATE. VERIFY.</span>
+      </div>
+      <div class="system-indicator">
+        <span class="dot"></span><span id="connection">CONNECTING</span>
+      </div>
+    </header>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-label">WORKSPACE / 01</div>
+        <nav aria-label="Primary">
+          <a href="#radar" data-view="radar"><span>01</span>Radar <b>↗</b></a
+          ><a href="#discover" data-view="discover"><span>02</span>Discover</a
+          ><a href="#evidence" data-view="evidence"
+            ><span>03</span>Price evidence</a
+          ><a href="#watchlist" data-view="watchlist"
+            ><span>04</span>Watchlist</a
+          ><a href="#health" data-view="health"><span>05</span>System health</a
+          ><a href="#settings" data-view="settings"><span>06</span>Settings</a>
+        </nav>
+        <div class="sidebar-foot">
+          <div class="crosshair" aria-hidden="true">+</div>
+          <p>LOW PRICE ≠<br />PRICING ERROR.</p>
+          <small
+            >Every signal needs evidence.<br />Every purchase needs you.</small
+          >
+          <div class="region">IN / INR <span>IST +05:30</span></div>
+        </div>
+      </aside>
+      <main id="main" tabindex="-1">
+        <div class="loading" role="status">Loading evidence workspace…</div>
+      </main>
+    </div>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+    <footer class="footer">
+      <span>GLITCH HUNTER INDIA</span
+      ><span>Coverage is measured. Certainty is earned.</span
+      ><span id="updated">NO OBSERVATIONS YET</span>
+    </footer>
+  </body>
+</html>

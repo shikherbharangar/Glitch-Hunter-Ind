@@ -1,0 +1,18 @@
+CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE products(id INTEGER PRIMARY KEY, identity_key TEXT UNIQUE NOT NULL, title TEXT NOT NULL, brand TEXT, model TEXT, category TEXT NOT NULL);
+CREATE TABLE variants(id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id), variant_key TEXT UNIQUE NOT NULL, attributes TEXT NOT NULL);
+CREATE TABLE listings(id INTEGER PRIMARY KEY, variant_id INTEGER NOT NULL REFERENCES variants(id), marketplace TEXT NOT NULL, marketplace_id TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, UNIQUE(marketplace,marketplace_id));
+CREATE TABLE offers(id INTEGER PRIMARY KEY, listing_id INTEGER NOT NULL REFERENCES listings(id), seller TEXT NOT NULL, UNIQUE(listing_id,seller));
+CREATE TABLE observations(id INTEGER PRIMARY KEY, offer_id INTEGER NOT NULL REFERENCES offers(id), variant_id INTEGER NOT NULL REFERENCES variants(id), price_paise INTEGER NOT NULL CHECK(price_paise>0), currency TEXT NOT NULL CHECK(currency='INR'), price_type TEXT NOT NULL, observed_at TEXT NOT NULL, recorded_at TEXT NOT NULL, provider TEXT NOT NULL, source_ref TEXT NOT NULL, source_group TEXT NOT NULL, reliability REAL NOT NULL, stock TEXT NOT NULL, purchase_status TEXT NOT NULL, attributes TEXT NOT NULL, quality TEXT NOT NULL, UNIQUE(offer_id,observed_at,provider,source_ref));
+CREATE INDEX observation_history ON observations(variant_id,observed_at);
+CREATE TABLE baselines(id INTEGER PRIMARY KEY, variant_id INTEGER NOT NULL REFERENCES variants(id), kind TEXT NOT NULL, price_paise INTEGER NOT NULL, source_ref TEXT NOT NULL, observed_at TEXT NOT NULL, quality REAL NOT NULL, validated INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE candidates(id INTEGER PRIMARY KEY, observation_id INTEGER UNIQUE NOT NULL REFERENCES observations(id), result TEXT NOT NULL, feedback TEXT, created_at TEXT NOT NULL);
+CREATE TABLE queries(id INTEGER PRIMARY KEY, normalized TEXT UNIQUE NOT NULL, query TEXT NOT NULL, category TEXT NOT NULL, family TEXT NOT NULL, runs INTEGER DEFAULT 0, discoveries INTEGER DEFAULT 0, useful INTEGER DEFAULT 0, false_positives INTEGER DEFAULT 0, last_run TEXT);
+CREATE TABLE jobs(id INTEGER PRIMARY KEY, query_id INTEGER NOT NULL REFERENCES queries(id), kind TEXT NOT NULL DEFAULT 'discovery', status TEXT NOT NULL DEFAULT 'queued', priority REAL NOT NULL, run_at TEXT NOT NULL, attempts INTEGER DEFAULT 0, error TEXT, created_at TEXT NOT NULL, finished_at TEXT);
+CREATE UNIQUE INDEX active_query ON jobs(query_id) WHERE status IN ('queued','running','retry');
+CREATE TABLE search_results(id INTEGER PRIMARY KEY, query_id INTEGER NOT NULL REFERENCES queries(id), url TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, marketplace TEXT NOT NULL, marketplace_id TEXT, observed_at TEXT NOT NULL, expires_at TEXT NOT NULL, UNIQUE(query_id,url));
+CREATE TABLE usage(id INTEGER PRIMARY KEY, provider TEXT NOT NULL, occurred_at TEXT NOT NULL, cost REAL, outcome TEXT NOT NULL);
+CREATE TABLE cache(key TEXT PRIMARY KEY, result TEXT NOT NULL, expires_at TEXT NOT NULL);
+CREATE TABLE watchlist(id INTEGER PRIMARY KEY, label TEXT NOT NULL, query TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+CREATE TABLE notifications(id INTEGER PRIMARY KEY, candidate_id INTEGER NOT NULL REFERENCES candidates(id), channel TEXT NOT NULL, fingerprint TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, error TEXT, UNIQUE(channel,fingerprint));
+CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);

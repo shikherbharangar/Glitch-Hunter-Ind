@@ -1,0 +1,36 @@
+services:
+  app:
+    build:
+      context: ..
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+      NODE_ENV: production
+      DATABASE_PATH: /app/data/glitch-hunter.sqlite
+      PUBLIC_ORIGIN: https://${APP_DOMAIN:?Set APP_DOMAIN}
+      APP_AUTH_TOKEN: ${APP_AUTH_TOKEN:?Set a strong APP_AUTH_TOKEN}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+    volumes:
+      - app_data:/app/data
+    expose:
+      - "3000"
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+volumes:
+  app_data:
+  caddy_data:
+  caddy_config:
