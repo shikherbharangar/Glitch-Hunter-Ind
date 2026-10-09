@@ -1,3 +1,5 @@
+import { assessListing } from "./assessment.js";
+import { enqueueSearchPriceChecks } from "./extraction.js";
 import express from "express";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -177,8 +179,15 @@ export function createApp({
         "SELECT COUNT(*) requests,SUM(cost) knownCost,SUM(CASE WHEN cost IS NULL THEN 1 ELSE 0 END) unknownCostRequests,SUM(credits_used) reportedCredits,SUM(CASE WHEN credits_used IS NULL THEN 1 ELSE 0 END) unknownCreditRequests FROM usage WHERE provider='firecrawl' AND occurred_at>=?",
       )
       .get(budgetDayStart());
-    res.json({
+    const assessmentContext = {
       settings: getSettings(db),
+      candidates: candidates(db),
+      extractions: db
+        .prepare("SELECT * FROM extraction_jobs ORDER BY id DESC LIMIT 100")
+        .all(),
+    };
+    res.json({
+      settings: assessmentContext.settings,
       providers: registry(db, { key: scheduler.provider.key }),
       notifications: notificationStatus(),
       coverage: {
@@ -193,7 +202,7 @@ export function createApp({
         queries: count("queries"),
       },
       usage,
-      candidates: candidates(db),
+      candidates: assessmentContext.candidates,
       jobs: db
         .prepare(
           "SELECT j.*,q.query,q.category,q.family FROM jobs j JOIN queries q ON q.id=j.query_id ORDER BY j.id DESC LIMIT 100",
@@ -206,11 +215,13 @@ export function createApp({
         .prepare(
           "SELECT * FROM search_results WHERE expires_at>? ORDER BY observed_at DESC LIMIT 200",
         )
-        .all(iso()),
+        .all(iso())
+        .map((row) => ({
+          ...row,
+          assessment: assessListing(row.url, assessmentContext),
+        })),
       watchlist: db.prepare("SELECT * FROM watchlist ORDER BY id DESC").all(),
-      extractions: db
-        .prepare("SELECT * FROM extraction_jobs ORDER BY id DESC LIMIT 100")
-        .all(),
+      extractions: assessmentContext.extractions,
       recentNotifications: db
         .prepare("SELECT * FROM notifications ORDER BY id DESC LIMIT 20")
         .all(),
@@ -307,6 +318,8 @@ export function createApp({
   app.post("/api/search", async (req, res) => {
     const d = querySchema.parse(req.body);
     const result = await scheduler.searchNow(d.query, d.category);
+    if (!result.error)
+      result.priceChecks = enqueueSearchPriceChecks(db, result.queryId).length;
     res.status(result.error ? 409 : 200).json(result);
   });
   app.post("/api/jobs", (req, res) => {

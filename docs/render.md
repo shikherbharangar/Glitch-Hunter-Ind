@@ -55,3 +55,9 @@ The container build, 74 mocked tests, sign-in cookies, font delivery and databas
 ## If you see HOST_NOT_ALLOWED
 
 Open the service’s **Environment** page, remove an incorrect `PUBLIC_ORIGIN`, and save/redeploy the latest commit. The app reads the assigned website URL from Render’s trusted environment, not from arbitrary request headers. The address beginning `https://dashboard.render.com/web/…` is the admin dashboard, not your website. Open the service’s public `https://…onrender.com` link near the service name. Custom domains can still use an explicit exact `PUBLIC_ORIGIN`; unknown hosts and unrelated browser origins remain blocked.
+
+## Price anomaly checks
+
+Search now queues up to three product-page checks on exact domains you have approved in Settings. Each extraction can spend Firecrawl credits and shares the daily request budget and minimum interval with searches. Robots permission is checked before extraction. Cached completed checks are reused; the per-result **Check price** button requests a fresh check.
+
+The result card shows the observed price and its assessment. Search snippets are never treated as prices. A page with missing variant details, blocked access, or conditional prices stays unverified. An observed price needs comparable offers for the same variant or historical observations to establish an anomaly. No external history feed or official Amazon/Flipkart price API is currently connected, so this deployment cannot promise reliable glitch detection across those marketplaces.

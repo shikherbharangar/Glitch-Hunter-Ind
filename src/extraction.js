@@ -327,3 +327,27 @@ export async function runExtraction(
     );
   }
 }
+
+// Bound automated follow-up to three approved pages; the worker enforces robots,
+// request spacing and the shared daily budget before every paid extraction.
+export function enqueueSearchPriceChecks(db, queryId, limit = 3) {
+  const settings = getSettings(db);
+  const results = db
+    .prepare(
+      "SELECT url FROM search_results WHERE query_id=? AND expires_at>? ORDER BY observed_at DESC,id DESC",
+    )
+    .all(queryId, iso());
+  const checks = [];
+  for (const row of results) {
+    if (checks.length >= limit) break;
+    if (!settings.scrapeAllowedDomains.includes(new URL(row.url).hostname))
+      continue;
+    try {
+      checks.push(enqueueExtraction(db, row.url, "Search price check"));
+    } catch (e) {
+      if (e.code !== "QUEUE_FULL") throw e;
+      break;
+    }
+  }
+  return checks;
+}

@@ -132,6 +132,13 @@ function candidateTable() {
 function queryForm(id = "query-form") {
   return `<form id="${id}" class="panel inline-form"><label>${id === "watch-form" ? "Product to monitor" : "What are you looking for?"}<input name="query" required minlength="3" maxlength="300" value="${id === "query-form" ? esc(searchDraft) : ""}" placeholder="e.g. 3D printer India"></label>${id === "watch-form" ? '<label>Label<input name="category" required maxlength="80" placeholder="Your research area"></label>' : ""}<button class="button primary" type="submit">${id === "watch-form" ? "Add monitor +" : "Search"}</button><p id="search-status" role="status" class="footnote"></p></form>`;
 }
+function priceAssessment(r) {
+  const a = r.assessment || {
+    label: "Price not checked",
+    message: "No price evidence collected yet.",
+  };
+  return `<div class="notice ${a.status === "possible_glitch" ? "good" : ""}"><div><strong>${esc(a.label)}</strong><p>${esc(a.message)}</p>${a.pricePaise ? `<p>Observed price: <strong>${money(a.pricePaise)}</strong>${a.referencePaise ? ` · Comparison price: ${money(a.referencePaise)}` : ""}</p>` : ""}${a.candidateId ? `<a href="#candidate/${a.candidateId}">See price evidence ↗</a>` : ""}</div></div>`;
+}
 function discover() {
   const seen = new Set();
   const results = state.discoveries.filter((r) => {
@@ -148,13 +155,13 @@ function discover() {
     heading(
       "PRODUCT SEARCH",
       "Search results.",
-      "Search for a product, then open a listing to see its current price.",
+      "Search for a product. Permitted product pages are checked for prices and compared against available evidence.",
       button("Refresh results ↻", "refresh-results"),
     ) +
     queryForm() +
     `<section id="search-results" aria-label="Search results"><div class="section-line"><h2>${results.length} ${results.length === 1 ? "result" : "results"}</h2><span>${selectedQueryId !== null ? "YOUR SEARCH" : "SAVED RESULTS"}</span></div>
-    <p class="footnote">These are search matches, not confirmed price glitches. Prices have not been checked.</p>
-    ${results.length ? results.map((r) => `<article class="result-row"><div><div class="meta">${esc(r.source_domain || "Unknown website")} / ${esc(r.marketplace === "other" ? "Public website" : r.marketplace.toUpperCase())}</div><h3><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)} ↗</a></h3><p>${esc(r.description)}</p><div class="meta muted">Found ${esc(stamp(r.observed_at))} · Price not checked</div></div><div class="row-actions"><a class="button primary small" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a><button class="button small" data-action="watch-result" data-id="${r.id}">Monitor</button></div></article>`).join("") : empty("No results yet.", selectedQueryId !== null ? "Try a different brand or model. This search returned no matches." : "Enter a product above and press Search.")}
+    <p class="footnote">Up to three results from approved websites are checked automatically. A possible glitch needs matching price evidence; search snippets are not purchase prices.</p>${!state.settings.scrapeAllowedDomains.length ? '<div class="notice warning"><div><strong>Price checks need a permitted source</strong><p>No websites are approved for product-page access. Searches will return links until you add permitted exact domains in Settings. No external price history is connected.</p><a href="#settings">Set up price sources ↗</a></div></div>' : ""}
+    ${results.length ? results.map((r) => `<article class="result-row"><div><div class="meta">${esc(r.source_domain || "Unknown website")} / ${esc(r.marketplace === "other" ? "Public website" : r.marketplace.toUpperCase())}</div><h3><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)} ↗</a></h3><p>${esc(r.description)}</p><div class="meta muted">Found ${esc(stamp(r.observed_at))}</div>${priceAssessment(r)}</div><div class="row-actions"><a class="button primary small" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a><button class="button small" data-action="check-price" data-id="${r.id}">Check price</button><button class="button small" data-action="watch-result" data-id="${r.id}">Monitor</button></div></article>`).join("") : empty("No results yet.", selectedQueryId !== null ? "Try a different brand or model. This search returned no matches." : "Enter a product above and press Search.")}
     </section>
     <details id="advanced-search" class="panel"><summary>Advanced tools</summary>
     <p>Optional background searches and price checks. Manual searches above work even when scheduled searches are off.</p>${button("Queue starter categories +", "seed")}
@@ -349,6 +356,10 @@ main.addEventListener("input", (e) => {
     $("#candidate-table").innerHTML = candidateTable();
   }
 });
+main.addEventListener("input", (e) => {
+  if (e.target.closest("#query-form") && e.target.name === "query")
+    searchDraft = e.target.value;
+});
 main.addEventListener("change", (e) => {
   if (e.target.id === "market" || e.target.id === "sort") {
     filter[e.target.id] = e.target.value;
@@ -363,6 +374,27 @@ main.addEventListener("click", async (e) => {
   try {
     const id = el.dataset.id;
     switch (el.dataset.action) {
+      case "check-price": {
+        const result = state.discoveries.find((x) => x.id === Number(id));
+        if (
+          !state.settings.scrapeAllowedDomains.includes(
+            new URL(result.url).hostname,
+          )
+        ) {
+          toast(
+            "Approve this website’s exact domain in Settings only if page access is permitted.",
+          );
+          location.hash = "settings";
+          return;
+        }
+        await api("/extractions", "POST", {
+          url: result.url,
+          category: "Search price check",
+          recheck: true,
+        });
+        toast("Price check requested. The result updates automatically.");
+        break;
+      }
       case "refresh-results":
         break;
       case "seed":
@@ -599,3 +631,15 @@ document.querySelector(".skip").addEventListener("click", (e) => {
   e.preventDefault();
   main.focus();
 });
+
+setInterval(() => {
+  if (
+    state &&
+    view === "discover" &&
+    !main.contains(document.activeElement) &&
+    state.extractions?.some((x) =>
+      ["queued", "running", "retry"].includes(x.status),
+    )
+  )
+    load().catch(() => {});
+}, 5000);

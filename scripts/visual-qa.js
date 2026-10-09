@@ -275,6 +275,12 @@ try {
         id: 999,
         url: "https://shop.example.com/products/telescope",
         title: "SYNTHETIC QA telescope",
+        assessment: {
+          status: "insufficient_evidence",
+          label: "Price observed — glitch not established",
+          message: "No comparable price for this exact variant yet.",
+          pricePaise: 1299900,
+        },
         description: "Synthetic listing link for browser validation only.",
         source_domain: "shop.example.com",
         marketplace: "other",
@@ -299,6 +305,10 @@ try {
         .getAttribute("href"),
       "https://shop.example.com/products/telescope",
     );
+    await resultsPage
+      .getByText("Price observed — glitch not established", { exact: true })
+      .waitFor();
+    await resultsPage.getByText("Observed price:", { exact: false }).waitFor();
     const position = await resultsPage.evaluate(() => ({
       result: document.querySelector("#search-results").getBoundingClientRect()
         .top,
