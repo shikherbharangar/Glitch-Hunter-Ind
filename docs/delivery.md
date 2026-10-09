@@ -19,7 +19,7 @@ The existing application was migrated in place; VIGIL, identity logic, CSS and P
 
 ## Validation performed
 
-- `npm test`: **72 passed, 0 failed, 0 skipped**, covering identity/variant separation, price parsing, missing and stale data, zero MAD, source independence, ordinary discounts, accessory/refurbished/bundle conflicts, expiry, persistence and migrations, provider contract/timeout/rate-limit behavior, queue recovery/cancellation/quota, cache expiry, notification deduplication, input validation, authentication and origin/host restrictions.
+- `npm test`: **74 passed, 0 failed, 0 skipped**, covering identity/variant separation, price parsing, missing and stale data, zero MAD, source independence, ordinary discounts, accessory/refurbished/bundle conflicts, expiry, persistence and migrations, provider contract/timeout/rate-limit behavior, queue recovery/cancellation/quota, cache expiry, notification deduplication, input validation, authentication and origin/host restrictions.
 - `npm run build`: production JS/CSS built successfully, local font-family audit passed.
 - `npm run backtest`: eight explicitly synthetic chronological cases plus five ablations ran. Full-model expected decisions pass; this is **not real-world accuracy evidence**. Report: `artifacts/synthetic-evaluation.json`.
 - Chromium/Playwright: 1440×1000 desktop and 390×844 mobile, navigation, watchlist add/remove, search and extraction queue/cancel, fresh recheck selection, six mocked provider-health states, settings persistence, observation entry, candidate review, reference entry, missing-provider states, initial loading, API failure and font failure. Actual custom font usage is verified via Chromium's font inspector. Screenshots and `visual-qa.json` are in `artifacts/`.

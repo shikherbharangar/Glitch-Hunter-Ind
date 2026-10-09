@@ -25,11 +25,11 @@ Three named volumes retain SQLite and Caddy certificate/configuration data. Do n
 
 ## Managed hosting
 
-Render/Railway or another Docker-capable host can use the same Dockerfile. Supply `APP_AUTH_TOKEN`, `PUBLIC_ORIGIN` matching the issued/custom HTTPS domain, and `FIRECRAWL_API_KEY` through its secure environment editor. Set a persistent volume mount at `/app/data` writable by the image’s non-root user; configure one instance without replicas. Configure the provider’s assigned `PORT` if it differs from 3000. Health checks can use `/`; test authenticated `/api/state` through the UI after deployment.
+Render/Railway or another Docker-capable host can use the same Dockerfile. Supply `APP_AUTH_TOKEN`, an optional `PUBLIC_ORIGIN` matching a custom HTTPS domain (Render’s assigned URL is detected automatically), and `FIRECRAWL_API_KEY` through its secure environment editor. Set a persistent volume mount at `/app/data` writable by the image’s non-root user; configure one instance without replicas. Configure the provider’s assigned `PORT` if it differs from 3000. Health checks can use `/`; test authenticated `/api/state` through the UI after deployment.
 
 Persistent disks, platform availability and pricing depend on your hosting account. No free persistent storage is assumed. A host that only supports ephemeral filesystems is unsuitable for this SQLite deployment without additional persistence work.
 
-The Docker image build, all 72 tests inside the image, authentication/secure-cookie checks, non-root runtime, bundled font, and database preservation through a container restart are verified. Compose and Caddy configuration validation also pass. These local checks do not establish a public URL or a publicly trusted certificate for a real domain.
+The Docker image build, all 74 tests inside the image, authentication/secure-cookie checks, non-root runtime, bundled font, and database preservation through a container restart are verified. Compose and Caddy configuration validation also pass. These local checks do not establish a public URL or a publicly trusted certificate for a real domain.
 
 In this cloud environment, container builds additionally need the configured outbound proxy hostname mapping and an optional `proxy_ca` BuildKit secret for the platform trust certificate. Normal hosts with direct Internet access can use the standard build commands above. No TLS verification was disabled and no platform proxy settings/certificate are embedded in the runtime image.
 

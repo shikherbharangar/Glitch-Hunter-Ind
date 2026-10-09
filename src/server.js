@@ -56,12 +56,54 @@ const querySchema = z
     category: z.string().trim().min(1).max(80).default("Custom"),
   })
   .strict();
+export function configuredOrigins({
+  publicOrigin = process.env.PUBLIC_ORIGIN,
+  renderOrigin = process.env.RENDER_EXTERNAL_URL,
+} = {}) {
+  return [
+    ...new Set(
+      [publicOrigin, renderOrigin].filter(Boolean).map((value) => {
+        let url;
+        try {
+          url = new URL(value.trim());
+        } catch {
+          throw new Error(
+            "Invalid deployment origin: use an exact HTTPS website URL.",
+          );
+        }
+        const local = ["localhost", "127.0.0.1", "[::1]"].includes(
+          url.hostname,
+        );
+        if (
+          (url.protocol !== "https:" && !(local && url.protocol === "http:")) ||
+          url.username ||
+          url.password ||
+          url.pathname !== "/" ||
+          url.search ||
+          url.hash
+        )
+          throw new Error(
+            "Invalid deployment origin: use an exact HTTPS website URL.",
+          );
+        return url.origin;
+      }),
+    ),
+  ];
+}
 export function createApp({
   db = openDb(),
   scheduler = new Scheduler(db),
   authToken = process.env.APP_AUTH_TOKEN,
   publicOrigin = process.env.PUBLIC_ORIGIN,
+  renderOrigin = process.env.RENDER_EXTERNAL_URL,
 } = {}) {
+  const origins = configuredOrigins({ publicOrigin, renderOrigin });
+  const allowed = new Set([
+    "localhost",
+    "127.0.0.1",
+    "[::1]",
+    ...origins.map((origin) => new URL(origin).hostname),
+  ]);
   const app = express(),
     sessions = new Map(),
     loginAttempts = new Map();
@@ -75,13 +117,13 @@ export function createApp({
       "Referrer-Policy": "no-referrer",
       "Cache-Control": "no-store",
     });
-    const allowed = new Set(["localhost", "127.0.0.1", "[::1]"]);
-    if (publicOrigin) allowed.add(new URL(publicOrigin).hostname);
     if (!allowed.has(req.hostname))
       return res.status(403).json({ error: "HOST_NOT_ALLOWED" });
     if (req.headers.origin) {
-      const expected = publicOrigin || `${req.protocol}://${req.headers.host}`;
-      if (req.headers.origin !== expected)
+      const expected = origins.length
+        ? origins
+        : [`${req.protocol}://${req.headers.host}`];
+      if (!expected.includes(req.headers.origin))
         return res.status(403).json({ error: "ORIGIN_NOT_ALLOWED" });
     }
     if (
@@ -115,7 +157,7 @@ export function createApp({
     sessions.set(token, Date.now() + 8 * 3600000);
     res.setHeader(
       "Set-Cookie",
-      `ghi_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${publicOrigin?.startsWith("https:") ? "; Secure" : ""}`,
+      `ghi_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${origins.some((origin) => origin.startsWith("https:")) ? "; Secure" : ""}`,
     );
     res.json({ ok: true });
   });
@@ -355,10 +397,11 @@ if (
   const host = process.env.HOST || "127.0.0.1";
   if (
     !["localhost", "127.0.0.1", "::1"].includes(host) &&
-    (!process.env.APP_AUTH_TOKEN || !process.env.PUBLIC_ORIGIN)
+    (!process.env.APP_AUTH_TOKEN ||
+      !configuredOrigins().some((origin) => origin.startsWith("https:")))
   )
     throw new Error(
-      "Public binding requires APP_AUTH_TOKEN and PUBLIC_ORIGIN; terminate HTTPS at a reverse proxy.",
+      "Public binding requires APP_AUTH_TOKEN and an HTTPS PUBLIC_ORIGIN or Render-assigned URL; terminate HTTPS at a reverse proxy.",
     );
   const { app, db, scheduler } = createApp();
   const server = app.listen(Number(process.env.PORT || 3000), host, () => {

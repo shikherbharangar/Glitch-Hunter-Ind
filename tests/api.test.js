@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { openDb } from "../src/db.js";
-import { createApp } from "../src/server.js";
+import { createApp, configuredOrigins } from "../src/server.js";
 import { manualInput } from "./fixtures.js";
 async function server(fn, options = {}) {
   const db = openDb(":memory:"),
@@ -188,3 +188,93 @@ test("Firecrawl policy validates settings and extraction remains explicit with m
     assert.equal(state.providers[0].id, "firecrawl");
     assert.deepEqual(state.providers[0].requirements, ["FIRECRAWL_API_KEY"]);
   }));
+test("Render-assigned hostname and origin work alongside an explicit domain, with Secure sign-in cookies", () =>
+  server(
+    async (request) => {
+      const headers = {
+        Host: "ghi-real.onrender.com",
+        Origin: "https://ghi-real.onrender.com",
+      };
+      assert.equal(
+        (await request("/api/auth", "GET", undefined, headers)).status,
+        200,
+      );
+      const login = await request(
+        "/api/login",
+        "POST",
+        { token: "synthetic-render-token" },
+        headers,
+      );
+      assert.equal(login.status, 200);
+      assert.match(login.headers.get("set-cookie"), /Secure/);
+      const cookie = login.headers.get("set-cookie").split(";")[0];
+      assert.equal(
+        (
+          await request("/api/state", "GET", undefined, {
+            ...headers,
+            Cookie: cookie,
+          })
+        ).status,
+        200,
+      );
+      assert.equal(
+        (
+          await request("/api/auth", "GET", undefined, {
+            Host: "your-service-name.onrender.com",
+          })
+        ).status,
+        200,
+      );
+      assert.equal(
+        (
+          await request("/api/auth", "GET", undefined, {
+            Host: "another.onrender.com",
+          })
+        ).status,
+        403,
+      );
+      assert.equal(
+        (
+          await request(
+            "/api/login",
+            "POST",
+            { token: "synthetic-render-token" },
+            { Host: "ghi-real.onrender.com", Origin: "https://evil.invalid" },
+          )
+        ).status,
+        403,
+      );
+    },
+    {
+      authToken: "synthetic-render-token",
+      publicOrigin: "https://your-service-name.onrender.com/",
+      renderOrigin: "https://ghi-real.onrender.com",
+    },
+  ));
+test("Render URL alone configures hosting; origin values are normalized and validated", () => {
+  assert.deepEqual(
+    configuredOrigins({
+      publicOrigin: undefined,
+      renderOrigin: "https://ghi-real.onrender.com/",
+    }),
+    ["https://ghi-real.onrender.com"],
+  );
+  assert.deepEqual(
+    configuredOrigins({
+      publicOrigin: " https://my.example.com/ ",
+      renderOrigin: undefined,
+    }),
+    ["https://my.example.com"],
+  );
+  for (const publicOrigin of [
+    "https://user:secret@example.com",
+    "http://public.example.com",
+    "https://example.com/path",
+    "https://example.com?x=1",
+    "not-a-url",
+  ])
+    assert.throws(
+      () => configuredOrigins({ publicOrigin, renderOrigin: undefined }),
+      /Invalid deployment origin/,
+    );
+});

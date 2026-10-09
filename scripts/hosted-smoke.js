@@ -6,10 +6,15 @@ const suffix = randomBytes(5).toString("hex");
 const container = `ghi-hosted-smoke-${suffix}`,
   volume = `ghi-hosted-smoke-data-${suffix}`;
 const token = randomBytes(32).toString("hex");
+const renderOnly = process.env.GHI_TEST_RENDER_ONLY === "1";
+const testOrigin = renderOnly
+  ? "https://ghi-test.onrender.com"
+  : "https://hosted.example.com";
 const env = {
   ...process.env,
   APP_AUTH_TOKEN: token,
-  PUBLIC_ORIGIN: "https://hosted.example.com",
+  PUBLIC_ORIGIN: renderOnly ? "" : testOrigin,
+  RENDER_EXTERNAL_URL: renderOnly ? testOrigin : "",
 };
 const docker = (args) =>
   execFileSync("docker", args, {
@@ -42,6 +47,8 @@ try {
     "APP_AUTH_TOKEN",
     "-e",
     "PUBLIC_ORIGIN",
+    "-e",
+    "RENDER_EXTERNAL_URL",
     "-v",
     `${volume}:/app/data`,
     process.env.GHI_IMAGE || "glitch-hunter-india:local",
@@ -53,8 +60,8 @@ try {
     return fetch(base + path, {
       method,
       headers: {
-        Host: "hosted.example.com",
-        Origin: "https://hosted.example.com",
+        Host: new URL(testOrigin).hostname,
+        Origin: testOrigin,
         "Content-Type": "application/json",
         ...(cookie ? { Cookie: cookie } : {}),
       },
@@ -114,6 +121,7 @@ try {
   console.log(
     JSON.stringify({
       containerStartup: "passed",
+      renderAssignedOrigin: renderOnly ? "passed" : "not tested",
       authentication: "passed",
       secureCookie: "passed",
       font: "passed",

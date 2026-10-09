@@ -80,7 +80,7 @@ For Render, follow [the Render setup guide](docs/render.md).
 
 A Docker image, HTTPS reverse proxy and persistent-volume configuration are provided. See [hosted deployment](docs/hosting.md) and [first-use guide](docs/quick-start.md). Hosting account/server and hostname are still required for a live website.
 
-Local deployment uses the run commands above. For a hosted single-user deployment, put a TLS reverse proxy in front and supply a strong random `APP_AUTH_TOKEN` and exact HTTPS `PUBLIC_ORIGIN`. Public binding refuses to start without both. Set these securely in the process environment, then:
+Local deployment uses the run commands above. For a hosted single-user deployment, put a TLS reverse proxy in front and supply a strong random `APP_AUTH_TOKEN` and exact HTTPS `PUBLIC_ORIGIN`. Public binding refuses to start without a sign-in token and a trusted HTTPS origin. On Render, its automatically supplied `RENDER_EXTERNAL_URL` provides that origin; `PUBLIC_ORIGIN` is optional unless you use a custom domain. Set these securely in the process environment, then:
 
 ```bash
 npm ci --omit=dev --cache /tmp/ghi-npm-cache

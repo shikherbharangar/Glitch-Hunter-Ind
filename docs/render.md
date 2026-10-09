@@ -10,18 +10,18 @@ The app is ready to deploy from `shikherbharangar/Glitch-Hunter-Ind`. Render wil
 4. Add a persistent disk mounted at **`/app/data`**. A small initial disk, such as 1 GB, is enough to get started. Disk and instance charges depend on Render’s current plans.
 5. Add the environment variables below. Enter secrets in Render’s environment editor, never in the repository or chat.
 
-| Variable            | What to enter                                                                                                                           |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `FIRECRAWL_API_KEY` | Your real Firecrawl API key. The cloud environment’s proxy binding is not transferred to Render.                                        |
-| `APP_AUTH_TOKEN`    | A strong random secret you will use to sign in. Generate one with your password manager or `openssl rand -hex 32` on your own computer. |
-| `PUBLIC_ORIGIN`     | The exact HTTPS address assigned to this service, such as your service’s `https://…onrender.com` address, with no trailing slash.       |
-| `DATABASE_PATH`     | `/app/data/glitch-hunter.sqlite`                                                                                                        |
-| `HOST`              | `0.0.0.0`                                                                                                                               |
-| `NODE_ENV`          | `production`                                                                                                                            |
+| Variable            | What to enter                                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FIRECRAWL_API_KEY` | Your real Firecrawl API key. The cloud environment’s proxy binding is not transferred to Render.                                               |
+| `APP_AUTH_TOKEN`    | A strong random secret you will use to sign in. Generate one with your password manager or `openssl rand -hex 32` on your own computer.        |
+| `PUBLIC_ORIGIN`     | Optional on Render. Leave it unset to use Render’s automatically injected `RENDER_EXTERNAL_URL`. Set it only for an exact custom HTTPS domain. |
+| `DATABASE_PATH`     | `/app/data/glitch-hunter.sqlite`                                                                                                               |
+| `HOST`              | `0.0.0.0`                                                                                                                                      |
+| `NODE_ENV`          | `production`                                                                                                                                   |
 
 The Docker image defaults to port 3000 and reads Render’s `PORT` if supplied. Do not set a separate build command or start command: the Dockerfile installs, tests, builds, and starts the app. Use **`/`** as the health-check path.
 
-6. Create/deploy the service. Render assigns its URL when the service is created. If the URL was not available when entering variables, copy it into `PUBLIC_ORIGIN` and save/redeploy. An initial start without `PUBLIC_ORIGIN` deliberately fails; do not bypass that requirement.
+6. Create/deploy the service. The app automatically accepts Render’s assigned website URL and keeps Secure sign-in cookies. You do not need to copy the dashboard URL or fill `PUBLIC_ORIGIN` for the standard `onrender.com` address. If you previously entered a placeholder or dashboard URL, remove `PUBLIC_ORIGIN` and redeploy.
 7. Wait until the deploy succeeds. Open the assigned HTTPS URL and sign in with `APP_AUTH_TOKEN`.
 
 ## Start using it
@@ -50,4 +50,8 @@ Keep the disk attached when redeploying; never delete it as a routine update. Ba
 
 After connecting the repository, Render can redeploy from `main` when new commits are pushed. Add a custom domain through Render’s dashboard if desired, then update `PUBLIC_ORIGIN` to its exact HTTPS origin and redeploy.
 
-The container build, 72 mocked tests, sign-in cookies, font delivery and database retention across restart are checked locally. Render service creation, its public certificate, and a live request on the hosted URL still need to be verified after deployment. The Render documentation site was unavailable from this cloud network, so this guide avoids promising specific prices or account features; consult [Render web services](https://render.com/docs/web-services), [Docker deployment](https://render.com/docs/docker) and [persistent disks](https://render.com/docs/disks) in your browser for current details.
+The container build, 74 mocked tests, sign-in cookies, font delivery and database retention across restart are checked locally. Render service creation, its public certificate, and a live request on the hosted URL still need to be verified after deployment. The Render documentation site was unavailable from this cloud network, so this guide avoids promising specific prices or account features; consult [Render web services](https://render.com/docs/web-services), [Docker deployment](https://render.com/docs/docker) and [persistent disks](https://render.com/docs/disks) in your browser for current details.
+
+## If you see HOST_NOT_ALLOWED
+
+Open the service’s **Environment** page, remove an incorrect `PUBLIC_ORIGIN`, and save/redeploy the latest commit. The app reads the assigned website URL from Render’s trusted environment, not from arbitrary request headers. The address beginning `https://dashboard.render.com/web/…` is the admin dashboard, not your website. Open the service’s public `https://…onrender.com` link near the service name. Custom domains can still use an explicit exact `PUBLIC_ORIGIN`; unknown hosts and unrelated browser origins remain blocked.
