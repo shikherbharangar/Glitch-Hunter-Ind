@@ -304,6 +304,11 @@ export function createApp({
     );
     res.json(detail(db, d.id));
   });
+  app.post("/api/search", async (req, res) => {
+    const d = querySchema.parse(req.body);
+    const result = await scheduler.searchNow(d.query, d.category);
+    res.status(result.error ? 409 : 200).json(result);
+  });
   app.post("/api/jobs", (req, res) => {
     const d = querySchema.parse(req.body);
     res.status(201).json(enqueue(db, d.query, d.category));

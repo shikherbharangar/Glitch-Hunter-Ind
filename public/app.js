@@ -31,6 +31,8 @@ let state,
   view = "discover",
   filter = { text: "", market: "all", sort: "confidence" },
   toastTimer;
+let searchDraft = "",
+  selectedQueryId = null;
 const expandedPanels = new Set();
 async function api(path, method = "GET", body) {
   const r = await fetch("/api" + path, {
@@ -46,7 +48,8 @@ async function api(path, method = "GET", body) {
     }
     throw new Error(
       data.issues?.map((x) => x.path.join(".") + ": " + x.message).join("; ") ||
-        human(data.error),
+        data.error ||
+        "Something went wrong. Please try again.",
     );
   }
   return data;
@@ -127,11 +130,13 @@ function candidateTable() {
   );
 }
 function queryForm(id = "query-form") {
-  return `<form id="${id}" class="panel inline-form"><label>Search query<input name="query" required minlength="3" maxlength="300" placeholder="A category, brand or exact model"></label><label>Category / label<input name="category" required maxlength="80" placeholder="Your research area"></label><button class="button primary" type="submit">${id === "watch-form" ? "Add monitor +" : "Queue search ↗"}</button></form>`;
+  return `<form id="${id}" class="panel inline-form"><label>${id === "watch-form" ? "Product to monitor" : "What are you looking for?"}<input name="query" required minlength="3" maxlength="300" value="${id === "query-form" ? esc(searchDraft) : ""}" placeholder="e.g. 3D printer India"></label>${id === "watch-form" ? '<label>Label<input name="category" required maxlength="80" placeholder="Your research area"></label>' : ""}<button class="button primary" type="submit">${id === "watch-form" ? "Add monitor +" : "Search"}</button><p id="search-status" role="status" class="footnote"></p></form>`;
 }
 function discover() {
   const seen = new Set();
   const results = state.discoveries.filter((r) => {
+    if (selectedQueryId !== null && r.query_id !== selectedQueryId)
+      return false;
     if (seen.has(r.url)) return false;
     seen.add(r.url);
     return true;
@@ -141,20 +146,21 @@ function discover() {
   ).length;
   return (
     heading(
-      "02 / DISCOVER",
+      "PRODUCT SEARCH",
       "Search results.",
-      "The listing links found by your searches. Open a listing to see the product and its current price.",
+      "Search for a product, then open a listing to see its current price.",
       button("Refresh results ↻", "refresh-results"),
     ) +
-    `<section id="search-results" aria-label="Search results"><div class="section-line"><h2>${results.length} ${results.length === 1 ? "result" : "results"}</h2><span>${pending} SEARCHES WAITING OR RUNNING</span></div>
+    queryForm() +
+    `<section id="search-results" aria-label="Search results"><div class="section-line"><h2>${results.length} ${results.length === 1 ? "result" : "results"}</h2><span>${selectedQueryId !== null ? "YOUR SEARCH" : "SAVED RESULTS"}</span></div>
     <p class="footnote">These are search matches, not confirmed price glitches. Prices have not been checked.</p>
-    ${results.length ? results.map((r) => `<article class="result-row"><div><div class="meta">${esc(r.source_domain || "Unknown website")} / ${esc(r.marketplace === "other" ? "Public website" : r.marketplace.toUpperCase())}</div><h3><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)} ↗</a></h3><p>${esc(r.description)}</p><div class="meta muted">Found ${esc(stamp(r.observed_at))} · Price not checked</div></div><div class="row-actions"><a class="button primary small" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a><button class="button small" data-action="watch-result" data-id="${r.id}">Monitor</button></div></article>`).join("") : empty("No results yet.", pending ? "Your searches are queued. Enable scanning in Settings, then refresh results after a search finishes." : "Add a search below to find product listing links.")}
+    ${results.length ? results.map((r) => `<article class="result-row"><div><div class="meta">${esc(r.source_domain || "Unknown website")} / ${esc(r.marketplace === "other" ? "Public website" : r.marketplace.toUpperCase())}</div><h3><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)} ↗</a></h3><p>${esc(r.description)}</p><div class="meta muted">Found ${esc(stamp(r.observed_at))} · Price not checked</div></div><div class="row-actions"><a class="button primary small" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a><button class="button small" data-action="watch-result" data-id="${r.id}">Monitor</button></div></article>`).join("") : empty("No results yet.", selectedQueryId !== null ? "Try a different brand or model. This search returned no matches." : "Enter a product above and press Search.")}
     </section>
-    <div class="section-line"><h2>Find more products</h2><span>${state.settings.scanEnabled ? "SCANNING ON" : "SCANNING PAUSED"} / <a href="#settings">Settings ↗</a></span></div>
-    ${queryForm()}${button("Queue starter categories +", "seed")}
+    <details id="advanced-search" class="panel"><summary>Advanced tools</summary>
+    <p>Optional background searches and price checks. Manual searches above work even when scheduled searches are off.</p>${button("Queue starter categories +", "seed")}
     <details id="price-check" class="panel"><summary>Check a product page for price evidence</summary><p>Review the website’s terms and approve its exact domain in Settings first. Ambiguous prices or variants stay unverified.</p><form id="url-form" class="inline-form"><label>Exact product URL<input name="url" type="url" required placeholder="Public HTTPS listing URL"></label><label>Category<input name="category" required maxlength="80"></label><label>Fresh recheck<select name="recheck"><option value="false">Use recent record</option><option value="true">Request fresh page</option></select></label><button class="button">Queue permitted extraction ↗</button></form></details>
     <details id="search-activity" class="panel"><summary>Search activity · ${pending} pending</summary><p class="footnote">Queries, retries and cancellations. Results are shown above.</p>${jobs()}</details>
-    <details id="extraction-activity" class="panel"><summary>Page extraction activity</summary>${extractions()}</details>`
+    <details id="extraction-activity" class="panel"><summary>Page extraction activity</summary>${extractions()}</details></details>`
   );
 }
 function jobs() {
@@ -441,17 +447,25 @@ main.addEventListener("submit", async (e) => {
       return;
     }
     if (form.id === "query-form" || form.id === "watch-form") {
+      if (form.id === "query-form") {
+        searchDraft = data.query;
+        submit.textContent = "Searching…";
+        $("#search-status").textContent = "Finding product listings…";
+      }
       const r = await api(
-        form.id === "query-form" ? "/jobs" : "/watchlist",
+        form.id === "query-form" ? "/search" : "/watchlist",
         "POST",
         data,
       );
+      if (form.id === "query-form") selectedQueryId = r.queryId;
       toast(
         r.cached
           ? "Cached query; no request spent."
           : r.deduplicated
             ? "This query is already queued."
-            : "Saved.",
+            : form.id === "query-form"
+              ? "Search complete."
+              : "Saved.",
       );
     }
     if (form.id === "url-form") {
@@ -544,8 +558,13 @@ main.addEventListener("submit", async (e) => {
     await load(mutationHash);
   } catch (err) {
     toast(err.message);
+    if (form.id === "query-form" && $("#search-status"))
+      $("#search-status").textContent = err.message;
   } finally {
-    if (submit) submit.disabled = false;
+    if (submit) {
+      submit.disabled = false;
+      if (form.id === "query-form") submit.textContent = "Search";
+    }
   }
 });
 window.addEventListener("hashchange", () =>

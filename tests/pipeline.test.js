@@ -295,3 +295,56 @@ test("full queue cannot starve existing jobs when a new monitor is added", async
   assert.equal(called, 1);
   db.close();
 });
+
+test("manual search runs with scheduling off, persists matches and reuses cache", async () => {
+  const db = openDb(":memory:");
+  let calls = 0;
+  const scheduler = new Scheduler(db, {
+    provider: {
+      key: "test",
+      search: async () => {
+        calls++;
+        return [
+          {
+            url: "https://shop.example.com/item",
+            title: "Synthetic printer",
+            description: "Test listing",
+          },
+        ];
+      },
+    },
+  });
+  assert.equal(getSettings(db).scanEnabled, false);
+  const result = await scheduler.searchNow("synthetic printer India");
+  assert.ok(result.queryId);
+  assert.equal(
+    db
+      .prepare("SELECT COUNT(*) n FROM search_results WHERE query_id=?")
+      .get(result.queryId).n,
+    1,
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM jobs").get().n, 1);
+  assert.equal(
+    (await scheduler.searchNow("synthetic printer India")).cached,
+    true,
+  );
+  assert.equal(calls, 1);
+  assert.match(
+    (await scheduler.searchNow("different printer India")).error,
+    /wait/,
+  );
+  db.close();
+});
+test("manual search explains missing credentials and respects a running request", async () => {
+  const db = openDb(":memory:");
+  const scheduler = new Scheduler(db, { provider: { key: "" } });
+  assert.match(
+    (await scheduler.searchNow("printer India")).error,
+    /FIRECRAWL_API_KEY/,
+  );
+  scheduler.provider.key = "test";
+  scheduler.active = {};
+  assert.match((await scheduler.searchNow("printer India")).error, /running/);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM usage").get().n, 0);
+  db.close();
+});

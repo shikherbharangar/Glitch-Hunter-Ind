@@ -203,6 +203,66 @@ export class Scheduler {
     if (this.active?.kind !== "extraction" && this.active?.id === id)
       this.active.controller.abort();
   }
+  async searchNow(query, category = "Custom") {
+    const db = this.db,
+      settings = getSettings(db),
+      normalized = queryKey(query);
+    const cached = db
+      .prepare("SELECT expires_at FROM cache WHERE key=?")
+      .get(cacheKey(normalized, settings));
+    const existingQuery = db
+      .prepare("SELECT id FROM queries WHERE normalized=?")
+      .get(normalized);
+    if (cached && Date.parse(cached.expires_at) > Date.now())
+      return { queryId: existingQuery.id, cached: true };
+    if (!this.provider.key)
+      return {
+        error: "Add FIRECRAWL_API_KEY in your hosting settings, then redeploy.",
+      };
+    if (this.active)
+      return {
+        error: "Another search is running. Please try again when it finishes.",
+      };
+    if (!requestAllowed(db))
+      return {
+        error:
+          "Search is paused by the daily budget or provider limit. Check Settings and System health.",
+      };
+    const seconds = Math.ceil(
+      (this.lastRequest + settings.intervalSeconds * 1000 - Date.now()) / 1000,
+    );
+    if (seconds > 0)
+      return { error: `Please wait ${seconds} seconds before another search.` };
+    const queued = enqueue(db, query, category, "manual");
+    const job = db
+      .prepare(
+        "SELECT jobs.*,queries.query,queries.normalized,queries.category,queries.family FROM jobs JOIN queries ON queries.id=jobs.query_id WHERE jobs.id=?",
+      )
+      .get(queued.id);
+    this.active = { id: job.id, controller: new AbortController() };
+    this.lastRequest = Date.now();
+    this.inflight = this.run(
+      { ...job, family: "manual" },
+      settings,
+      this.active.controller.signal,
+    );
+    try {
+      await this.inflight;
+    } finally {
+      this.active = null;
+      this.inflight = null;
+    }
+    const outcome = db
+      .prepare("SELECT status,error FROM jobs WHERE id=?")
+      .get(job.id);
+    return outcome.status === "done"
+      ? { queryId: job.query_id, cached: false }
+      : {
+          error:
+            "The search provider could not complete this search. Check your Firecrawl key and credits in System health.",
+          code: outcome.error,
+        };
+  }
   async tick() {
     if (this.active) return;
     pruneCache(this.db);

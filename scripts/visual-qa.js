@@ -105,6 +105,11 @@ try {
       "health",
       "settings",
     ]) {
+      if (
+        ["evidence", "health"].includes(view) &&
+        (await page.locator("nav details").getAttribute("open")) === null
+      )
+        await page.locator("nav summary").click();
       await page.locator(`nav a[data-view="${view}"]`).click();
       await page
         .getByRole("heading", {
@@ -150,15 +155,32 @@ try {
     await page.locator('nav a[data-view="discover"]').click();
     await page.locator("#query-form").waitFor();
     await page.locator('form [name="query"]').fill("Synthetic QA printer");
+    await page.route("**/api/search", (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "Synthetic provider unavailable. Try again.",
+        }),
+      }),
+    );
+    await page.getByRole("button", { name: "Search", exact: true }).click();
     await page
-      .locator('#query-form [name="category"], #watch-form [name="category"]')
-      .fill("SYNTHETIC QA");
-    await page.getByRole("button", { name: "Queue search ↗" }).click();
-    await page.locator("#search-activity summary").click();
-    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+      .locator("#search-status")
+      .filter({ hasText: "Synthetic provider unavailable" })
+      .waitFor();
+    await page.route("**/api/search", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ queryId: 999, cached: false }),
+      }),
+    );
+    await page.getByRole("button", { name: "Search", exact: true }).click();
     await page
-      .getByRole("button", { name: "Cancel", exact: true })
-      .waitFor({ state: "hidden" });
+      .getByText("Try a different brand or model.", { exact: false })
+      .waitFor();
+    await page.locator("#advanced-search > summary").click();
     await page
       .getByText("Check a product page for price evidence", { exact: true })
       .click();
@@ -282,7 +304,7 @@ try {
         .top,
       form: document.querySelector("#query-form").getBoundingClientRect().top,
     }));
-    assert.ok(position.result < position.form);
+    assert.ok(position.form < position.result);
     assert.equal(
       await resultsPage.locator("#search-activity").getAttribute("open"),
       null,
