@@ -20,6 +20,7 @@ export function openDb(
   for (const [version, file] of [
     [1, "001_initial.sql"],
     [2, "002_firecrawl.sql"],
+    [3, "003_radar.sql"],
   ]) {
     if (
       db.prepare("SELECT 1 FROM schema_migrations WHERE version=?").get(version)
@@ -69,6 +70,20 @@ export const defaults = {
   costPerScrape: null,
   alertsEnabled: false,
   costPerSearch: null,
+  radarEnabled: false,
+  radarCategories: [
+    "fabrication",
+    "computing",
+    "imaging",
+    "audio",
+    "astronomy",
+    "instruments",
+  ],
+  radarCycleMinutes: 360,
+  historyIntervalMinutes: 360,
+  historyDailyBudget: 100,
+  radarMinPricePaise: 1000000,
+  maxTrackedProducts: 100,
   weights: { H: 0.3, L: 0.25, M: 0.2, T: 0.2, R: 0.05 },
 };
 export function getSettings(db) {

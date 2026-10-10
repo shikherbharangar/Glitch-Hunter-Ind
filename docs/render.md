@@ -50,14 +50,18 @@ Keep the disk attached when redeploying; never delete it as a routine update. Ba
 
 After connecting the repository, Render can redeploy from `main` when new commits are pushed. Add a custom domain through Render’s dashboard if desired, then update `PUBLIC_ORIGIN` to its exact HTTPS origin and redeploy.
 
-The container build, 74 mocked tests, sign-in cookies, font delivery and database retention across restart are checked locally. Render service creation, its public certificate, and a live request on the hosted URL still need to be verified after deployment. The Render documentation site was unavailable from this cloud network, so this guide avoids promising specific prices or account features; consult [Render web services](https://render.com/docs/web-services), [Docker deployment](https://render.com/docs/docker) and [persistent disks](https://render.com/docs/disks) in your browser for current details.
+The container build, automated mocked tests, sign-in cookies, font delivery and database retention across restart are checked locally. Render service creation, its public certificate, and a live request on the hosted URL still need to be verified after deployment. The Render documentation site was unavailable from this cloud network, so this guide avoids promising specific prices or account features; consult [Render web services](https://render.com/docs/web-services), [Docker deployment](https://render.com/docs/docker) and [persistent disks](https://render.com/docs/disks) in your browser for current details.
 
 ## If you see HOST_NOT_ALLOWED
 
 Open the service’s **Environment** page, remove an incorrect `PUBLIC_ORIGIN`, and save/redeploy the latest commit. The app reads the assigned website URL from Render’s trusted environment, not from arbitrary request headers. The address beginning `https://dashboard.render.com/web/…` is the admin dashboard, not your website. Open the service’s public `https://…onrender.com` link near the service name. Custom domains can still use an explicit exact `PUBLIC_ORIGIN`; unknown hosts and unrelated browser origins remain blocked.
 
-## Price anomaly checks
+## Category radar and price history
 
-Search now queues up to three product-page checks on exact domains you have approved in Settings. Each extraction can spend Firecrawl credits and shares the daily request budget and minimum interval with searches. Robots permission is checked before extraction. Cached completed checks are reused; the per-result **Check price** button requests a fresh check.
+After deploying, open your website with `/#radar`, choose categories and permitted exact retailer domains, and press **Start category radar**. You do not need to enter a query. Tech and high-value categories are preselected; the price floor defaults to ₹10,000.
 
-The result card shows the observed price and its assessment. Search snippets are never treated as prices. A page with missing variant details, blocked access, or conditional prices stays unverified. An observed price needs comparable offers for the same variant or historical observations to establish an anomaly. No external history feed or official Amazon/Flipkart price API is currently connected, so this deployment cannot promise reliable glitch detection across those marketplaces.
+Discovery uses Firecrawl within the existing budget. Price checks use direct permitted public-page reads by default and require no extra history key/subscription or Firecrawl scraping credits. They have a separate daily page-read budget. The radar revisits identified products and saves their prices in SQLite; keep the persistent disk attached so history survives deployments.
+
+The VIGIL 0.2 model uses a robust historical trend, median absolute deviation, a change-point diagnostic and matching-seller standards. Product cards show prices, comparisons, supporting history, scores and any access/data limitation. Matching live seller prices can support a candidate immediately; historical modelling needs at least eight source-days collected after startup. There is no pre-existing external history feed or official Amazon/Flipkart API in this deployment.
+
+See [the complete radar guide](radar.md). Source access must be permitted; redirects, robots restrictions and captchas are not bypassed. No pricing-error probability or verified checkout is claimed.

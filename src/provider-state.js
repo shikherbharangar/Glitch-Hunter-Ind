@@ -1,35 +1,42 @@
 import { iso, getSettings, budgetDayStart } from "./db.js";
 export const activeProvider = "firecrawl";
-export function requestAllowed(db) {
+export function requestAllowed(db, provider = activeProvider) {
   const settings = getSettings(db),
     health = db
       .prepare("SELECT * FROM provider_health WHERE provider=?")
-      .get(activeProvider);
+      .get(provider);
   return (
     !(Date.parse(health?.blocked_until) > Date.now()) &&
     db
       .prepare(
         "SELECT COUNT(*) n FROM usage WHERE provider=? AND occurred_at>=?",
       )
-      .get(activeProvider, budgetDayStart()).n < settings.dailyBudget
+      .get(provider, budgetDayStart()).n <
+      (provider === "public_http"
+        ? settings.historyDailyBudget
+        : settings.dailyBudget)
   );
 }
-export function beginRequest(db, operation) {
+export function beginRequest(db, operation, provider = activeProvider) {
   const settings = getSettings(db);
   const row = db
     .prepare(
       "INSERT INTO usage(provider,occurred_at,cost,outcome,operation) VALUES(?,?,?,?,?)",
     )
     .run(
-      activeProvider,
+      provider,
       iso(),
-      operation === "search" ? settings.costPerSearch : settings.costPerScrape,
+      provider === "public_http"
+        ? 0
+        : operation === "search"
+          ? settings.costPerSearch
+          : settings.costPerScrape,
       "pending",
       operation,
     );
   db.prepare(
     "INSERT INTO provider_health(provider,last_request_at,last_outcome) VALUES(?,?,?) ON CONFLICT(provider) DO UPDATE SET last_request_at=excluded.last_request_at,last_outcome=COALESCE(provider_health.last_outcome,excluded.last_outcome)",
-  ).run(activeProvider, iso(), "pending");
+  ).run(provider, iso(), "pending");
   return Number(row.lastInsertRowid);
 }
 export function finishRequest(
@@ -40,6 +47,9 @@ export function finishRequest(
   { retryAfter = 0 } = {},
 ) {
   const at = iso();
+  const provider =
+    db.prepare("SELECT provider FROM usage WHERE id=?").get(id)?.provider ||
+    activeProvider;
   db.prepare("UPDATE usage SET outcome=?,credits_used=? WHERE id=?").run(
     outcome,
     credits,
@@ -47,11 +57,11 @@ export function finishRequest(
   );
   db.prepare(
     "INSERT INTO provider_health(provider,last_request_at,last_outcome) VALUES(?,?,?) ON CONFLICT(provider) DO UPDATE SET last_request_at=excluded.last_request_at,last_outcome=excluded.last_outcome",
-  ).run(activeProvider, at, outcome);
+  ).run(provider, at, outcome);
   if (outcome === "success")
     db.prepare(
       "UPDATE provider_health SET last_success_at=?,blocked_until=NULL,block_reason=NULL WHERE provider=?",
-    ).run(at, activeProvider);
+    ).run(at, provider);
   if (["RATE_LIMITED", "QUOTA_EXHAUSTED"].includes(outcome))
     db.prepare(
       "UPDATE provider_health SET blocked_until=?,block_reason=? WHERE provider=?",
@@ -62,6 +72,6 @@ export function finishRequest(
             1000,
       ).toISOString(),
       outcome,
-      activeProvider,
+      provider,
     );
 }

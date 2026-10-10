@@ -533,67 +533,68 @@ test("schema v1 upgrade retains legacy rows, user settings and prevents old cach
   db = openDb(path);
   assert.equal(
     db.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n,
-    2,
+    3,
   );
   db.close();
   rmSync(dir, { recursive: true });
 });
-test("Firecrawl alert is withheld until a fresh matching observation rechecks the offer", async () => {
-  const db = configuredDb();
-  setSettings(db, {
-    alertsEnabled: true,
-    severityThreshold: 0,
-    confidenceThreshold: 0,
-  });
-  const first = {
-    ...manualInput(),
-    url,
-    observedAt: new Date(Date.now() - 1000).toISOString(),
-  };
-  ingest(db, first, {
-    provider: "firecrawl",
-    reliability: 0.65,
-    purchaseStatus: "PRODUCT_PAGE_OBSERVED",
-    sourceGroup: "synthetic",
-  });
-  let c = candidates(db)[0];
-  c.result.blocked = false;
-  let sends = 0;
-  assert.deepEqual(
-    await notifyCandidate(db, c, {
-      senders: {
-        test: async () => {
-          sends++;
-        },
-      },
-    }),
-    [],
-  );
-  ingest(
-    db,
-    { ...first, observedAt: iso() },
-    {
-      provider: "firecrawl",
+for (const provider of ["firecrawl", "public_http"])
+  test(`${provider} alert is withheld until a fresh matching observation rechecks the offer`, async () => {
+    const db = configuredDb();
+    setSettings(db, {
+      alertsEnabled: true,
+      severityThreshold: 0,
+      confidenceThreshold: 0,
+    });
+    const first = {
+      ...manualInput(),
+      url,
+      observedAt: new Date(Date.now() - 1000).toISOString(),
+    };
+    ingest(db, first, {
+      provider,
       reliability: 0.65,
       purchaseStatus: "PRODUCT_PAGE_OBSERVED",
       sourceGroup: "synthetic",
-    },
-  );
-  c = candidates(db)[0];
-  c.result.blocked = false;
-  assert.deepEqual(
-    await notifyCandidate(db, c, {
-      senders: {
-        test: async () => {
-          sends++;
+    });
+    let c = candidates(db)[0];
+    c.result.blocked = false;
+    let sends = 0;
+    assert.deepEqual(
+      await notifyCandidate(db, c, {
+        senders: {
+          test: async () => {
+            sends++;
+          },
         },
+      }),
+      [],
+    );
+    ingest(
+      db,
+      { ...first, observedAt: iso() },
+      {
+        provider,
+        reliability: 0.65,
+        purchaseStatus: "PRODUCT_PAGE_OBSERVED",
+        sourceGroup: "synthetic",
       },
-    }),
-    ["test"],
-  );
-  assert.equal(sends, 1);
-  db.close();
-});
+    );
+    c = candidates(db)[0];
+    c.result.blocked = false;
+    assert.deepEqual(
+      await notifyCandidate(db, c, {
+        senders: {
+          test: async () => {
+            sends++;
+          },
+        },
+      }),
+      ["test"],
+    );
+    assert.equal(sends, 1);
+    db.close();
+  });
 test("extraction queue recovers after restart, waits without key, and preserves cancellation", async () => {
   const db = configuredDb(),
     queued = enqueueExtraction(db, url);

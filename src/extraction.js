@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import robotsParser from "robots-parser";
 import { EnvHttpProxyAgent, fetch as proxyFetch } from "undici";
 import { publicUrl, listingUrl } from "./urls.js";
@@ -13,7 +14,12 @@ import {
 const dispatcher = new EnvHttpProxyAgent();
 export async function robotsAllowed(
   url,
-  { fetchImpl = proxyFetch, signal, timeoutMs = 10000 } = {},
+  {
+    fetchImpl = proxyFetch,
+    signal,
+    timeoutMs = 10000,
+    userAgents = ["GlitchHunterIndia", "FirecrawlBot", "FirecrawlAgent", "*"],
+  } = {},
 ) {
   const target = publicUrl(url);
   if (!target) throw new ProviderError("INVALID_URL");
@@ -31,21 +37,42 @@ export async function robotsAllowed(
   } catch {
     throw new ProviderError("ROBOTS_POLICY_UNAVAILABLE");
   }
-  if (response.status === 404) return true;
-  if (response.status !== 200)
+  if (response.status === 404) {
+    await response.body?.cancel();
+    return true;
+  }
+  if (response.status !== 200) {
+    await response.body?.cancel();
     throw new ProviderError("ROBOTS_POLICY_UNAVAILABLE");
+  }
   const text = await response.text();
   if (text.length > 500000)
     throw new ProviderError("ROBOTS_POLICY_UNAVAILABLE");
   const rules = robotsParser(robotsURL, text);
-  for (const ua of ["GlitchHunterIndia", "FirecrawlBot", "FirecrawlAgent", "*"])
+  for (const ua of userAgents)
     if (rules.isAllowed(target.href, ua) === false)
       throw new ProviderError("ROBOTS_DISALLOWED");
   return true;
 }
+export function validatedGTIN(value) {
+  const digits = String(value || "").trim();
+  if (
+    !/^(?:\d{8}|\d{12}|\d{13}|\d{14})$/.test(digits) ||
+    /^(\d)\1+$/.test(digits)
+  )
+    return null;
+  const body = digits.slice(0, -1).split("").reverse().map(Number);
+  const sum = body.reduce(
+    (total, digit, i) => total + digit * (i % 2 === 0 ? 3 : 1),
+    0,
+  );
+  return (10 - (sum % 10)) % 10 === Number(digits.at(-1))
+    ? digits.padStart(14, "0")
+    : null;
+}
 export function extractStructuredObservation(
   document,
-  { url, category = "Extracted listing" } = {},
+  { url, category = "Extracted listing", allowListingHistory = false } = {},
 ) {
   const source = listingUrl(document.metadata?.sourceURL),
     target = listingUrl(url);
@@ -112,9 +139,12 @@ export function extractStructuredObservation(
     (p.url && listingUrl(p.url)?.url !== target.url)
   )
     return { status: "unverified", reasons: ["AMBIGUOUS_VARIANT"] };
+  const gtin = validatedGTIN(
+    p.gtin || p.gtin13 || p.gtin14 || p.gtin12 || p.gtin8,
+  );
   const attributes = {
     brand: typeof p.brand === "string" ? p.brand : p.brand?.name,
-    model: p.model,
+    model: p.model || p.mpn,
     bundle: props.bundle,
     capacity: props.capacity,
     colour: p.color || props.colour,
@@ -122,15 +152,18 @@ export function extractStructuredObservation(
     kind: props.kind,
     packCount: Number(props.packcount),
     condition:
-      offer.itemCondition === "https://schema.org/NewCondition"
+      (offer.itemCondition || p.itemCondition) ===
+      "https://schema.org/NewCondition"
         ? "new"
-        : offer.itemCondition === "https://schema.org/UsedCondition"
+        : (offer.itemCondition || p.itemCondition) ===
+            "https://schema.org/UsedCondition"
           ? "used"
-          : offer.itemCondition === "https://schema.org/RefurbishedCondition"
+          : (offer.itemCondition || p.itemCondition) ===
+              "https://schema.org/RefurbishedCondition"
             ? "refurbished"
             : undefined,
   };
-  if (
+  const complete =
     [
       "model",
       "bundle",
@@ -140,11 +173,51 @@ export function extractStructuredObservation(
       "condition",
       "kind",
       "brand",
-    ].some((k) => typeof attributes[k] !== "string" || !attributes[k].trim()) ||
-    !Number.isInteger(attributes.packCount) ||
-    attributes.packCount < 1
-  )
-    return { status: "unverified", reasons: ["AMBIGUOUS_VARIANT"] };
+    ].every((k) => typeof attributes[k] === "string" && attributes[k].trim()) &&
+    Number.isInteger(attributes.packCount) &&
+    attributes.packCount >= 1;
+  if (!complete) {
+    if (
+      !allowListingHistory ||
+      !attributes.brand ||
+      !(attributes.model || p.sku || p.gtin || p.gtin13 || p.gtin14) ||
+      !p.name
+    )
+      return { status: "unverified", reasons: ["AMBIGUOUS_VARIANT"] };
+    attributes.model ||= p.sku || p.gtin || p.gtin13 || p.gtin14;
+    for (const k of [
+      "bundle",
+      "capacity",
+      "colour",
+      "generation",
+      "kind",
+      "condition",
+    ])
+      attributes[k] ||= "unknown";
+    if (!Number.isInteger(attributes.packCount) || attributes.packCount < 1)
+      attributes.packCount = 0;
+    // Missing variant fields remain unknown. A title-specific URL scope permits
+    // own-listing history, never comparisons with a similar-looking product.
+    if (gtin && attributes.condition !== "unknown") {
+      attributes.gtin = gtin;
+      attributes.model = "gtin:" + gtin;
+      attributes.catalogScope = "gtin:" + gtin + ":" + attributes.condition;
+    } else {
+      attributes.listingScope = createHash("sha256")
+        .update(
+          target.url +
+            ":" +
+            String(p.name).normalize("NFKC").toLowerCase().trim(),
+        )
+        .digest("hex");
+    }
+  }
+  if (allowListingHistory && gtin && attributes.condition !== "unknown") {
+    attributes.gtin = gtin;
+    attributes.model = "gtin:" + gtin;
+    attributes.catalogScope = "gtin:" + gtin + ":" + attributes.condition;
+    delete attributes.listingScope;
+  }
   if (offer.priceCurrency !== "INR")
     return { status: "unverified", reasons: ["CURRENCY_MISMATCH"] };
   if (offer.priceValidUntil && Date.parse(offer.priceValidUntil) < Date.now())
@@ -168,7 +241,10 @@ export function extractStructuredObservation(
     return { status: "unverified", reasons: ["INVALID_FULL_PRICE"] };
   }
   const seller =
-    typeof offer.seller === "string" ? offer.seller : offer.seller?.name;
+    (typeof offer.seller === "string" ? offer.seller : offer.seller?.name) ||
+    (!complete && allowListingHistory && target.marketplace === "other"
+      ? new URL(target.url).hostname + " (storefront)"
+      : null);
   if (!seller) return { status: "unverified", reasons: ["SELLER_UNKNOWN"] };
   const stock =
     offer.availability === "https://schema.org/InStock"
@@ -243,6 +319,7 @@ export async function runExtraction(
   { signal, robotsCheck = robotsAllowed } = {},
 ) {
   const settings = getSettings(db);
+  const providerId = provider.id || "firecrawl";
   let usage;
   try {
     const target = publicUrl(job.url);
@@ -256,13 +333,13 @@ export async function runExtraction(
       timeoutMs: Math.min(settings.requestTimeoutMs, 10000),
     });
     if (signal?.aborted) throw new ProviderError("CANCELLED");
-    if (!requestAllowed(db)) {
+    if (!requestAllowed(db, providerId)) {
       db.prepare("UPDATE extraction_jobs SET status='queued' WHERE id=?").run(
         job.id,
       );
       return;
     }
-    usage = beginRequest(db, "scrape");
+    usage = beginRequest(db, "scrape", providerId);
     const document = await provider.scrape(job.url, {
       signal,
       timeoutMs: settings.requestTimeoutMs,
@@ -271,12 +348,13 @@ export async function runExtraction(
     const extracted = extractStructuredObservation(document, {
       url: job.url,
       category: job.category,
+      allowListingHistory: true,
     });
     let observationId = null;
     if (extracted.observation) {
       try {
         const saved = ingest(db, extracted.observation, {
-          provider: "firecrawl",
+          provider: providerId,
           reliability: 0.65,
           purchaseStatus: "PRODUCT_PAGE_OBSERVED",
           sourceGroup: `seller:${target.hostname}:${extracted.observation.seller.toLowerCase().trim()}`,
@@ -286,6 +364,24 @@ export async function runExtraction(
         extracted.status = "unverified";
         extracted.reasons = ["INVALID_LISTING_DETAILS"];
       }
+    }
+    if (
+      observationId &&
+      (db.prepare("SELECT COUNT(*) n FROM radar_targets").get().n <
+        settings.maxTrackedProducts ||
+        db.prepare("SELECT 1 FROM radar_targets WHERE url=?").get(job.url))
+    ) {
+      db.prepare(
+        "INSERT INTO radar_targets VALUES(?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET observation_id=excluded.observation_id,last_checked=excluded.last_checked,next_check=excluded.next_check",
+      ).run(
+        job.url,
+        job.category,
+        observationId,
+        new Date(
+          Date.now() + settings.historyIntervalMinutes * 60000,
+        ).toISOString(),
+        iso(),
+      );
     }
     finishRequest(db, usage, "success", document.creditsUsed);
     db.prepare(
@@ -297,7 +393,7 @@ export async function runExtraction(
         reasons: extracted.reasons || [],
         sourceURL: document.metadata.sourceURL,
         retrievedAt: document.retrievedAt,
-        provider: "firecrawl",
+        provider: providerId,
         verification: observationId
           ? "PRODUCT_PAGE_OBSERVED"
           : "UNVERIFIED_PAGE",
@@ -334,7 +430,7 @@ export function enqueueSearchPriceChecks(db, queryId, limit = 3) {
   const settings = getSettings(db);
   const results = db
     .prepare(
-      "SELECT url FROM search_results WHERE query_id=? AND expires_at>? ORDER BY observed_at DESC,id DESC",
+      "SELECT sr.url,q.category FROM search_results sr JOIN queries q ON q.id=sr.query_id WHERE query_id=? AND expires_at>? ORDER BY observed_at DESC,sr.id DESC",
     )
     .all(queryId, iso());
   const checks = [];
@@ -343,7 +439,7 @@ export function enqueueSearchPriceChecks(db, queryId, limit = 3) {
     if (!settings.scrapeAllowedDomains.includes(new URL(row.url).hostname))
       continue;
     try {
-      checks.push(enqueueExtraction(db, row.url, "Search price check"));
+      checks.push(enqueueExtraction(db, row.url, row.category));
     } catch (e) {
       if (e.code !== "QUEUE_FULL") throw e;
       break;

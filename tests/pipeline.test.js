@@ -26,7 +26,7 @@ test("migrations and observations persist after reopening database", () => {
   assert.equal(detail(db, a.id).current.price_paise, 499900);
   assert.equal(
     db.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n,
-    2,
+    3,
   );
   db.close();
   rmSync(dir, { recursive: true });

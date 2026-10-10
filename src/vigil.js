@@ -1,3 +1,4 @@
+import { robustDiagnostics } from "./robust-model.js";
 import { identity } from "./identity.js";
 export const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 export const median = (a) => {
@@ -33,6 +34,7 @@ export function score({
     (h) =>
       h.price_paise > 0 &&
       Date.parse(h.observed_at) < time &&
+      Date.parse(h.observed_at) >= time - 180 * 86400000 &&
       h.currency === "INR" &&
       h.price_type === "full" &&
       h.stock !== "out_of_stock" &&
@@ -117,25 +119,36 @@ export function score({
         time - Date.parse(h.observed_at) <= 7 * 86400000,
     )
     .at(-1);
+  const robust = robustDiagnostics({
+    price: p,
+    history: hist,
+    independent,
+    at: time,
+  });
   const signals = {
-    H:
-      u == null
-        ? null
-        : clamp((-Math.log10(u) / 2) * clamp(logDrop(Math.exp(m)) / 0.35)) *
-            0.5 +
-          (zr == null ? 0 : clamp(-zr / 8) * 0.5),
+    H: robust.historicalSignal,
     L: low == null ? null : clamp(logDrop(low) / Math.log(5)),
-    M: c == null ? null : clamp(logDrop(c) / Math.log(5)),
-    T: previous ? clamp(logDrop(previous.price_paise) / Math.log(5)) : null,
+    M: robust.marketSignal,
+    T:
+      previous || robust.temporalSignal != null
+        ? Math.max(
+            previous ? clamp(logDrop(previous.price_paise) / Math.log(5)) : 0,
+            robust.temporalSignal || 0,
+          )
+        : null,
     R: !match.blocked && !reasons.length ? 1 : 0,
   };
   const entries = Object.entries(signals).filter(([, v]) => v != null),
     total = entries.reduce((s, [k]) => s + (weights[k] || 0), 0);
-  const evidenceCoverage =
+  const evidenceCoverage = Math.max(
+    Math.min(independent.length / 3, 1) * 0.9,
+    (hist.length >= 8 ? 0.85 : 0) *
+      Math.min((robust.forecast?.spanDays || 0) / 7, 1),
     (hist.length >= 8 ? 0.35 : (hist.length / 8) * 0.35) +
-    (low ? 0.3 : 0) +
-    (independent.length ? Math.min(independent.length / 3, 1) * 0.25 : 0) +
-    (previous ? 0.1 : 0);
+      (low ? 0.3 : 0) +
+      (independent.length ? Math.min(independent.length / 3, 1) * 0.25 : 0) +
+      (previous ? 0.1 : 0),
+  );
   const severity =
     total && entries.some(([k]) => k !== "R" && weights[k] > 0)
       ? ((100 * entries.reduce((s, [k, v]) => s + v * (weights[k] || 0), 0)) /
@@ -165,17 +178,44 @@ export function score({
       MANUAL_CHECKOUT_REQUIRED: 0.2,
     }[current.purchase_status] || 0;
   const historyStability = mad === 0 ? 0.75 : 1;
+  const historySupport =
+    hist.length >= 8
+      ? Math.min(hist.length / 16, 1) *
+        Math.min((robust.forecast?.spanDays || 0) / 7, 1) *
+        Math.exp(
+          -Math.max(0, time - Date.parse(robust.forecast?.latest)) /
+            (45 * 86400000),
+        )
+      : 0;
+  const marketSupport = Math.min(independent.length / 2, 1);
+  const baselineSupport = low ? Math.min(...trusted.map((b) => b.quality)) : 0;
+  const support = Math.max(historySupport, marketSupport, baselineSupport);
   let confidence =
     100 *
     i *
     f *
-    clamp(current.reliability) *
-    historyStability *
-    (0.35 * q +
-      0.2 * Math.min(n / 3, 1) +
-      0.15 * a +
-      0.15 * v +
-      0.15 * Math.min(hist.length / 30, 1));
+    (0.4 * clamp(current.reliability) +
+      0.35 * support +
+      0.15 *
+        Math.max(
+          baselineSupport,
+          Math.min(independent.length / 3, 1),
+          historySupport * historyStability,
+        ) +
+      0.1 *
+        (current.purchase_status === "CHECKOUT_VERIFIED"
+          ? 1
+          : current.purchase_status === "PRODUCT_PAGE_OBSERVED"
+            ? 0.75
+            : 0.2));
+  confidence *= mad === 0 ? 0.95 : 1;
+  if (!hist.length && !independent.length && !low)
+    confidence = Math.min(confidence, 25);
+  if (
+    current.provider === "manual" ||
+    current.quality?.includes("USER_ENTERED_UNVALIDATED")
+  )
+    confidence = Math.min(confidence, 49);
   if (current.purchase_status === "SEARCH_RESULT_OBSERVED")
     confidence = Math.min(confidence, 25);
   const blocked = reasons.some((r) =>
@@ -197,9 +237,9 @@ export function score({
   if (!independent.length) reasons.push("NO_INDEPENDENT_OFFERS");
   if (current.purchase_status !== "CHECKOUT_VERIFIED")
     reasons.push("MANUAL_CHECKOUT_REQUIRED");
-  const reference = low ?? (m == null ? c : Math.exp(m));
+  const reference = low ?? robust.referencePaise;
   return {
-    model: "VIGIL-0.1",
+    model: "VIGIL-0.2",
     evaluatedAt: new Date(now).toISOString(),
     severity: Math.round(severity),
     confidence: Math.round(confidence),
@@ -211,29 +251,38 @@ export function score({
         : {
             savingPaise: Math.max(0, Math.round(reference - p)),
             referencePaise: Math.round(reference),
-            provenance: low
-              ? "trusted_external_low"
-              : m != null
-                ? "scanner_median"
-                : "independent_market_median",
+            provenance: low ? "trusted_external_low" : robust.referenceKind,
             realizationProbability: null,
           },
     purchaseStatus: current.purchase_status,
     blocked,
     reasons,
     signals,
+    mathematics: robust,
     statistics: {
       n: hist.length,
       u,
       zr,
       mad,
-      typicalPaise: m == null ? null : Math.round(Math.exp(m)),
+      typicalPaise:
+        robust.forecast?.typicalPaise ??
+        (m == null ? null : Math.round(Math.exp(m))),
       trustedLowPaise: low,
       scannerLowPaise: scanner,
       scannerLowBreach: logDrop(scanner),
       independentSources: n,
     },
-    factors: { q, i, f, a, v, historyStability, evidenceCoverage },
+    factors: {
+      q,
+      i,
+      f,
+      a,
+      v,
+      historyStability,
+      evidenceCoverage,
+      historySupport,
+      marketSupport,
+    },
     weights,
   };
 }

@@ -1,55 +1,73 @@
-# VIGIL 0.1: Variant-Integrity and Glitch Inference Layer
+# VIGIL 0.2: robust price anomaly model
 
-This is a project-specific model proposal using standard robust statistics, not a claim of unprecedented mathematics. Implementation: `src/vigil.js`. All INR amounts are integer paise. Output scores are uncalibrated rankings.
+Implementation: `src/vigil.js`, `src/robust-model.js`, `src/identity.js`. These are standard robust statistical techniques combined into a project-specific ranking model. There is no claim of new mathematics, empirical calibration or a trained detector. All prices are integer INR paise.
 
-## Evidence selection and identity
+## Comparable evidence
 
-The identity matcher checks model, GTIN, SKU, bundle, capacity, colour, generation, condition, kind and pack count. Any shared conflicting attribute yields confidence zero. Without a shared model/GTIN/SKU, confidence is 0.15. Otherwise `i = 0.7 + 0.3 * matchingAttributes/10`. Missing model, bundle, condition, kind or pack count caps i at 0.6. Values below 0.8 block alerts. Fuzzy titles are not used as proof.
+History must predate the candidate, be at most 180 days old, have a positive full INR price, acceptable stock, reliability at least 0.6, and compatible identity. Conflicting variants are excluded. Retain one latest point per underlying source group per UTC day; repeated polls cannot increase independent history support. Current comparisons require a matching variant, independent seller and source group, in-stock full INR price and observation within one hour. Current sellers are excluded from their own comparison median.
 
-Comparable historical observations must predate the candidate, match variant attributes, have positive full INR prices, reliability at least 0.6 and not be out of stock. One latest observation per source group per UTC day is retained for statistical counts. Repeated polling does not imply independent evidence. Current offers must match identity, be full INR prices, have reliability >=0.6, be in stock and within one hour. Offers from the candidate seller or source group are excluded; both seller and underlying source group are deduplicated.
+Explicit model/configuration/bundle/condition/kind/pack conflicts block comparisons. Complete structured variants use the existing identity matcher. For incomplete retailer data, a title-specific URL hash permits only same-listing history. Unknown fields are not asserted to match across shops; unknown condition blocks priority classification. Checksum-valid GTINs plus explicit condition permit catalog matching, with brand and shared attribute conflicts still rejected. User-entered prices remain unvalidated and cannot reach priority confidence or provide trusted historical evidence.
 
-Manual entries have reliability 0.5 and an unvalidated quality flag. They do not become trusted history. Trusted external lows require an internal validated source contract and quality >=0.8. The public baseline API cannot set validation flags. No operational external history adapter exists yet.
+## Robust historical standard price
 
-## Signals, each bounded in [0,1]
+Let `y_i = log(p_i)` and `t_i` be days since the earliest retained observation. Use weights
 
-Let p be current price, m median(log history), MAD median absolute deviation of log history, n comparable source-days, and D(b)=max(0,log(b/p)). `clip` means clamp to [0,1].
+`w_i = sourceReliability_i * exp(-(candidateTime - observationTime_i)/(45 days))`.
 
-- **H**: for n>=8, `u=(1+count(h<=p))/(n+1)`. If MAD>0.015, `zr=(log(p)-m)/(1.4826*MAD)`. H is `0.5*clip(-log10(u)/2)*clip(D(exp(m))/0.35) + 0.5*clip(-zr/8)`. The zr contribution is zero when spread is unstable; H is unavailable below eight observations. The magnitude term prevents a tiny lowest-ever movement receiving an extreme rarity score. u is a descriptive rank, not a precise event probability.
-- **L**: `clip(D(trusted_low)/log(5))`. Unavailable without validated trusted low. The scanner low is reported separately and never labelled all-time low.
-- **M**: `clip(D(exp(median(log(independent offers))))/log(5))`. Unavailable without qualifying independent offers.
-- **T**: `clip(D(previous same-seller price)/log(5))`, using the latest comparable observation in the previous seven days. This is a bounded drop diagnostic, not a validated change-point model. Unavailable without prior comparable evidence.
-- **R**: 1 if identity passes and there are no integrity/freshness rejection reasons; otherwise 0. It cannot create a severity score alone.
+With at least eight comparable source-days, fit a weighted Theil–Sen slope:
 
-Default weights H=.30, L=.25, M=.20, T=.20, R=.05; configured weights are nonnegative and R<=.10. A price signal must have positive weight. Available weights are renormalized. Let coverage C be `0.35*min(n/8,1) + 0.30*hasTrustedLow + 0.25*min(independentOffers/3,1) + 0.10*hasPrevious`.
+`b = weightedMedian((y_j-y_i)/(t_j-t_i), min(w_i,w_j))`,
 
-`severity = 100 * weightedAvailableMean * (0.5 + 0.5*C)`; severity is zero if no price signal is available. Missing evidence cannot earn full severity. The result stores signals, weights, median, MAD, u, zr and provenance so the ranking can be reproduced using the same evaluation time.
+using only pairs at least one day apart. Bound `b` to ±0.03 log units/day. Fit
 
-## Evidence confidence, separately
+`a = weightedMedian(y_i-b*t_i, w_i)`.
 
-- q: minimum quality of qualifying trusted low sources, otherwise `min(0.65,n/30*0.65)` for scanner history, otherwise 0.
-- i: explicit identity confidence above.
-- f: `exp(-ageMilliseconds/3_600_000)` (one-hour exponential time constant, not half-life).
-- a: fraction of independent qualifying offers >1.3p, otherwise 0.
-- v: search result .05; product page .50; cart .75; checkout 1; manual required .20; all other states 0.
-- r: current source reliability in [0,1].
-- N: distinct underlying source groups across current/history/independent offers; repeated observations do not increase N.
+The fit uses the latest 180 source-days and at most 60 deterministic samples for the quadratic slope calculation. Prediction is `mu = a+b*t`, extrapolated at most two days after the latest point. A source's routine falling prices therefore need not look like a sudden glitch.
 
-`confidence = 100*i*f*r*historyStability*(.35*q + .20*min(N/3,1) + .15*a + .15*v + .15*min(n/30,1))`.
+Estimate residual dispersion
 
-historyStability is 0.75 when historical MAD is zero, otherwise 1. A separate log scanner-low breach is reported as a diagnostic, never labelled an all-time low.
+`MAD = weightedMedian(abs(y_i-a-b*t_i),w_i)`;
 
-Search-result confidence is capped at 25. Missing sources, old observations and insufficient history lower confidence. This is evidence completeness/reliability scoring, not an empirically calibrated correctness probability.
+`sigma = max(0.025,1.4826*MAD)`.
 
-## Value and purchase state
+The historical standard is `round(exp(mu))`. The historical signal uses a conservative reference `round(exp(mu-1.645*sigma))`. That multiplier is a ranking heuristic, **not** a validated prediction interval. The sigma floor prevents zero spread from causing infinite statistics.
 
-Potential saving is `max(0,reference-p)` with reference provenance, choosing trusted low, scanner median or independent current median in that order. It is **not monetary expected utility**: realization probability remains null because no cancellation/fulfilment model exists.
+The one-sided robust deviation is `z=max(0,(mu-log(currentPrice))/sigma)`. The lower-tail history rank is `(1+count(historyPrice<=currentPrice))/(n+1)`; it is descriptive, not a calibrated p-value. A one-sided Page CUSUM accumulates negative detrended log-price residuals with drift allowance `0.5*sigma`, then includes the current residual. It is a change diagnostic, not a calibrated sequential hypothesis test.
 
-Purchase states are SEARCH_RESULT_OBSERVED, PRODUCT_PAGE_OBSERVED, CART_PRICE_OBSERVED, CHECKOUT_VERIFIED, MANUAL_CHECKOUT_REQUIRED, EXPIRED, UNAVAILABLE and UNKNOWN. Automated integrations do not open carts or private sessions. Manual ingestion creates MANUAL_CHECKOUT_REQUIRED; public review actions can mark expired or unavailable, but cannot fabricate checkout verification.
+## Independent seller standard and signals
 
-## Gates, ranking and evaluation
+The market standard is the reliability-weighted geometric median of qualifying independent offers. If both historical and market standards exist, use their **minimum** for the ordinary comparison reference, avoiding a stale high historical level dominating a newer cheaper market. A validated external historical low, if one was already legitimately recorded, retains separate precedence/provenance; this release adds no external history feed.
 
-Identity incompleteness, conflicting listing configuration, non-new condition, non-full price, wrong currency, out-of-stock, expired/unavailable, or observation older than one hour suppress alerts. Confidence and severity must **both** meet configured thresholds (default 70 and 75). The UI defaults to evidence-first ordering. Feedback can reject a candidate and adjust yield statistics for queries associated with its listing.
+Let `clip` clamp to [0,1], `D(b)=max(0,log(b/currentPrice))`.
 
-`npm run backtest` evaluates eight labelled synthetic cases in chronological order; it never uses future observations for a baseline. It also performs identity, history-rarity, market, temporal and source-weight ablations. Identity ablation deliberately erases structured conflicts; source-weight ablation forces reliability to one. These diagnostics exercise gates; they are not a representative empirical study. Detection delay, survival, checkout confirmation, cost per actionable candidate, real category coverage and calibration stay null without observed labelled outcomes.
+- **H:** `0.65*clip(D(conservativeHistory)/log(4)) + 0.35*clip((z-2)/6)*clip((1-currentPrice/historicalStandard)/0.4)`.
+- **L:** `clip(D(validatedHistoricalLow)/log(5))`; unavailable without validated provenance.
+- **M:** `clip(D(independentSellerStandard)/log(4))`; unavailable without a matching independent offer.
+- **T:** maximum of the previous same-seller drop `clip(D(previousPrice)/log(5))` and `clip(CUSUM/(8*sigma))*clip((1-currentPrice/historicalStandard)/0.5)`.
+- **R:** existing identity, condition, price, stock and freshness integrity check; cannot create severity alone.
 
-Failure modes: sparse/biased histories; stale index prices; coordinated sellers; aliases disguising common ownership; seller source-group misassignment; gradual model drift; incomplete bundles; conditional coupon/shipping differences; uncertain account eligibility. The temporal diagnostic is not a full sequential change-point detector. Weights remain provisional.
+Default weights remain H=.30, L=.25, M=.20, T=.20, R=.05. Available positive weights are renormalized; at least one price signal is required. Severity is the weighted mean multiplied by `100*(0.5+0.5*coverage)`.
+
+Coverage is the maximum of the previous additive history/low/market/drop coverage, `0.9*min(independentOffers/3,1)`, and `0.85*hasEightSourceDays*min(historySpanDays/7,1)`. This lets sufficient independent live offers support a cold-start candidate without requiring every possible data source. One unsupported comparison cannot provide full coverage.
+
+## Evidence index, separately from severity
+
+`historySupport = hasEightSourceDays * min(n/16,1) * min(spanDays/7,1) * exp(-latestHistoryAge/(45 days))`.
+
+`marketSupport = min(independentOffers/2,1)`.
+
+`baselineSupport` is the minimum validated low-source quality, otherwise zero. `support = max(historySupport,marketSupport,baselineSupport)`.
+
+With identity index i, current reliability r, freshness `f=exp(-observationAge/(one hour))`, and page/checkout verification v (page .75, checkout 1, other .2):
+
+`confidence = 100*i*f*(.40*r + .35*support + .15*max(baselineSupport,min(independentOffers/3,1),historySupport*historyStability) + .10*v)`.
+
+Historical zero raw MAD uses stability .75 and a further .95 score multiplier. Manual/unvalidated input is capped at 49; search-only input at 25. With no history, independent offer or validated low, confidence is capped at 25. Confidence expresses evidence support, **not** a calibrated probability. This avoids the old multiplicative reliability ceiling making every .65-reliability page impossible to classify at the default threshold, while retaining source and identity checks.
+
+Priority classification requires both configured severity (default 75) and evidence (default 70), no rejected feedback, and no integrity blocks. Large anomalies with evidence at least 50 can be surfaced separately for review. Non-new or unknown condition, incomplete/conflicting identity, wrong currency, non-full price, out of stock, expired/unavailable or current observation older than one hour prevents priority classification. The auto collector requests a fresh check for priority candidates; notifications still need two fresh matching same-offer prices and opt-in delivery.
+
+## Evaluation and limits
+
+`npm test` covers anomaly magnitude, routine discounts, robust trend handling, outlier resistance, sparse history, unknown listing scopes, catalog matching, source independence, future leakage, repeated polls, budget separation, autonomous category-to-price flow and persistence. `npm run backtest` remains an explicitly labelled eight-case synthetic diagnostic with ablations, not a real-market accuracy study.
+
+No labeled marketplace validation or calibration was performed. Source selection bias, missing shipping/eligibility details, merchant data errors, coordinated sellers, silent listing changes and incomplete histories remain material limitations. This model cannot compensate for unavailable prices. It neither invents backdated history nor uses MRP as a standard price. Buying and checkout confirmation remain manual.

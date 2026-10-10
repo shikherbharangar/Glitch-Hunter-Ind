@@ -28,7 +28,7 @@ const human = (s) => String(s).replaceAll("_", " ").toLowerCase();
 const tag = (s, style = "") =>
   `<span class="tag ${style}">${esc(human(s))}</span>`;
 let state,
-  view = "discover",
+  view = "radar",
   filter = { text: "", market: "all", sort: "confidence" },
   toastTimer;
 let searchDraft = "",
@@ -77,23 +77,30 @@ function providers() {
     .join("");
 }
 function radar() {
-  const credible = state.candidates.filter(
-    (c) =>
-      !c.result.blocked &&
-      c.result.confidence >= state.settings.confidenceThreshold &&
-      c.result.severity >= state.settings.severityThreshold &&
-      c.feedback !== "false_positive",
-  );
+  const radar = state.radar || {
+    categories: [],
+    products: [],
+    trackedProducts: 0,
+    collectedPrices: 0,
+  };
+  const s = state.settings;
+  const possible = radar.products.filter(
+    (p) => p.assessment.status === "possible_glitch",
+  ).length;
   return (
     heading(
-      "01 / THE ANOMALY DESK",
-      "Price radar.",
-      "Unusual prices, weighed against the evidence.",
-      `<a class="button primary" href="#discover">View search results <span>↗</span></a>`,
+      "AUTOMATIC PRODUCT DISCOVERY",
+      "Category radar.",
+      "Choose categories once. The radar finds products, collects prices, and ranks unusual drops against matching evidence.",
+      button("Refresh", "refresh-results"),
     ) +
-    `${state.providers[0].status === "credentials_missing" ? '<div class="notice warning"><span>AUTOMATION DISABLED / Firecrawl credentials are missing. Manual evidence and history remain available.</span><a href="#settings">Configure provider ↗</a></div>' : ""}<div class="summary-strip"><div class="readout"><small>Priority candidates</small><strong>${credible.length.toString().padStart(2, "0")}</strong><em>Severity + evidence thresholds</em></div><div class="readout"><small>Under observation</small><strong>${state.candidates.length.toString().padStart(2, "0")}</strong><em>Including manual review</em></div><div class="readout"><small>Discovered listings</small><strong>${state.coverage.listings.toString().padStart(2, "0")}</strong><em>Within current cache lifetime</em></div><div class="readout"><small>API budget today</small><strong>${state.usage.requests}<span class="muted"> / ${state.settings.dailyBudget}</span></strong><em>Actual requests / daily limit</em></div></div>
- ${state.coverage.listings && !state.candidates.length ? `<div class="notice"><span>Your searches found ${state.coverage.listings} listing links. Open Search results to see them; Radar shows recorded price evidence.</span><a href="#discover">View results ↗</a></div>` : ""}<div class="section-line"><h2>Candidate ledger</h2><span>RANKING SCORES, NOT PROBABILITIES</span></div><div class="filters"><label class="sr-only" for="filter">Filter products</label><input id="filter" placeholder="Filter by product, model or category" value="${esc(filter.text)}"><label class="sr-only" for="market">Marketplace</label><select id="market"><option value="all">All marketplaces</option><option value="amazon" ${filter.market === "amazon" ? "selected" : ""}>Amazon India</option><option value="flipkart" ${filter.market === "flipkart" ? "selected" : ""}>Flipkart</option></select><label class="sr-only" for="sort">Sort candidates</label><select id="sort"><option value="confidence">Evidence first</option><option value="severity" ${filter.sort === "severity" ? "selected" : ""}>Severity first</option><option value="freshness" ${filter.sort === "freshness" ? "selected" : ""}>Newest first</option></select></div><div id="candidate-table">${candidateTable()}</div>
- <div class="below-grid"><section><div class="section-line"><h2>The verification protocol</h2><span>VIGIL / 0.1</span></div><ol class="protocol"><li><span>01</span><div>Identify the exact variant<small>Model, configuration, condition and bundle.</small></div></li><li><span>02</span><div>Question the price evidence<small>History, provenance and independent offers.</small></div></li><li><span>03</span><div>Verify before you act<small>A search result never confirms checkout.</small></div></li></ol></section><section><div class="section-line"><h2>Source availability</h2><a href="#health">Inspect ↗</a></div>${providers()}</section></div>`
+    `<div class="summary-strip"><div class="readout"><small>Possible glitches</small><strong>${possible}</strong><em>Price and evidence thresholds met</em></div><div class="readout"><small>Tracked products</small><strong>${radar.trackedProducts}</strong><em>Prices collected over time</em></div><div class="readout"><small>Price observations</small><strong>${radar.collectedPrices}</strong><em>Saved on the persistent disk</em></div><div class="readout"><small>Radar</small><strong class="radar-status">${s.radarEnabled ? "ON" : "OFF"}</strong><em>${s.radarEnabled ? "Updates automatically" : "Choose categories to start"}</em></div></div>
+    <details id="radar-setup" class="panel" ${s.radarEnabled ? "" : "open"}><summary>Categories & price sources</summary><form id="radar-form"><fieldset><legend>Tech and high-value equipment</legend><div class="category-choices">${radar.categories.map((c) => `<label><input type="checkbox" name="categories" value="${esc(c.id)}" ${s.radarCategories.includes(c.id) ? "checked" : ""}> ${esc(c.label)}</label>`).join("")}</div></fieldset><label>Permitted websites (exact domains, comma separated)<input name="domains" value="${esc(s.scrapeAllowedDomains.join(", "))}" placeholder="e.g. a retailer that permits public page access" required></label><p class="footnote">Only add websites whose terms permit these reads. Robots exclusions are respected. Blocked pages stay unverified.</p><div class="form-grid"><label>Focus on standard prices above ₹<input name="minPrice" type="number" min="0" max="100000000" value="${s.radarMinPricePaise / 100}" required></label><label>Scan categories every (minutes)<input name="cycle" type="number" min="30" max="10080" value="${s.radarCycleMinutes}" required></label><label>Collect product prices every (minutes)<input name="historyInterval" type="number" min="30" max="10080" value="${s.historyIntervalMinutes}" required></label><label>Direct page reads per day<input name="historyBudget" type="number" min="1" max="1000" value="${s.historyDailyBudget}" required></label></div><p class="footnote">Direct page reads need no history subscription. Discovery uses your Firecrawl credits, up to ${s.dailyBudget} requests per day. Prices are collected only while this app is running.</p><button class="button primary" type="submit">${s.radarEnabled ? "Save & scan categories" : "Start category radar"}</button> ${s.radarEnabled ? button("Pause radar", "pause-radar") : ""}</form></details>
+    <div class="section-line"><h2>Products the radar found</h2><span>${radar.products.length} PRODUCTS / ${possible} POSSIBLE GLITCHES</span></div>
+    <p class="footnote">Standard price means a matching seller comparison or a robust historical estimate—not MRP. New products start by collecting evidence; a search result alone is never a glitch.</p>
+    ${radar.products.length ? `<div class="radar-grid">${radar.products.map((p) => `<article class="panel radar-card"><div class="meta">${esc(p.category)}</div><h2>${esc(p.title)}</h2>${priceAssessment({ assessment: p.assessment })}<dl><dt>Historical standard</dt><dd>${money(p.history?.typicalPaise)}</dd><dt>Matching seller standard</dt><dd>${money(p.marketPricePaise)}</dd><dt>History collected</dt><dd>${p.historyPoints} source-days</dd>${p.dropFraction != null ? `<dt>Below comparison price</dt><dd>${Math.round(p.dropFraction * 100)}%</dd>` : ""}${p.assessment.severity != null ? `<dt>Anomaly / evidence</dt><dd>${p.assessment.severity}/100 · ${p.assessment.confidence}/100</dd>` : ""}</dl><div class="row-actions"><a class="button primary small" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">View product ↗</a></div></article>`).join("")}</div>` : empty(s.radarEnabled ? "Finding products in your categories…" : "Your radar is ready to start.", s.radarEnabled ? "Discovery and permitted price checks run in the background. This page updates automatically; failures are visible in scan activity below." : "Select categories and permitted price sources above. No specific search query is needed.")}
+    <details id="radar-activity" class="panel"><summary>Scan activity & unavailable prices</summary>${jobs()}${extractions()}</details>
+    <details id="model-notes" class="panel"><summary>How the mathematical model works</summary><p>VIGIL 0.2 fits a robust trend to log prices using a time-weighted Theil–Sen slope and median absolute deviation. It combines unusual historical drops, independent seller prices and recent price changes. Scores measure anomaly strength and evidence support; they are not probabilities of an error.</p><p>At least eight independent source-days are needed for historical modelling. Listings with incomplete variant information are compared only against their own history. Identical variants can be compared across sellers. Estimated standard prices are labelled by their source, and checkout still needs your confirmation.</p></details>`
   );
 }
 function candidateTable() {
@@ -302,7 +309,7 @@ function login() {
     '<form id="login-form" class="panel inline-form"><label>Access token<input type="password" name="token" autocomplete="current-password" required></label><button class="button primary">Sign in</button></form>';
 }
 async function render() {
-  view = location.hash.slice(1) || "discover";
+  view = location.hash.slice(1) || "radar";
   document.querySelectorAll("nav a").forEach((a) => {
     const active =
       a.dataset.view === view ||
@@ -320,14 +327,15 @@ async function render() {
     ? renderer()
     : empty("View not found.", "Use the workspace navigation.");
   main.querySelectorAll("details[id]").forEach((panel) => {
-    panel.open = expandedPanels.has(panel.id);
+    if (panel.id !== "radar-setup" || expandedPanels.has(panel.id))
+      panel.open = expandedPanels.has(panel.id);
   });
 }
 async function load(requestedHash = location.hash) {
   state = await api("/state");
   $("#connection").textContent =
     state.providers[0].status === "operational"
-      ? state.settings.scanEnabled
+      ? state.settings.scanEnabled || state.settings.radarEnabled
         ? "SCANNER ENABLED"
         : "SCANNER PAUSED"
       : human(state.providers[0].status).toUpperCase();
@@ -374,6 +382,10 @@ main.addEventListener("click", async (e) => {
   try {
     const id = el.dataset.id;
     switch (el.dataset.action) {
+      case "pause-radar":
+        await api("/radar", "POST", { radarEnabled: false });
+        toast("Radar paused. Already queued price checks may finish.");
+        break;
       case "check-price": {
         const result = state.discoveries.find((x) => x.id === Number(id));
         if (
@@ -473,6 +485,26 @@ main.addEventListener("submit", async (e) => {
     submit = form.querySelector("button[type=submit],button:not([type])");
   if (submit) submit.disabled = true;
   try {
+    if (form.id === "radar-form") {
+      const checked = [
+        ...form.querySelectorAll('[name="categories"]:checked'),
+      ].map((el) => el.value);
+      if (!checked.length) throw new Error("Select at least one category.");
+      await api("/radar", "POST", {
+        radarEnabled: true,
+        radarCategories: checked,
+        scrapeAllowedDomains: data.domains
+          .split(",")
+          .map((v) => v.trim().toLowerCase())
+          .filter(Boolean),
+        radarMinPricePaise: Math.round(Number(data.minPrice) * 100),
+        radarCycleMinutes: Number(data.cycle),
+        historyIntervalMinutes: Number(data.historyInterval),
+        historyDailyBudget: Number(data.historyBudget),
+      });
+      expandedPanels.delete("radar-setup");
+      toast("Radar started. Finding products and collecting price evidence.");
+    }
     if (form.id === "login-form") {
       await api("/login", "POST", data);
       await load();
@@ -643,3 +675,13 @@ setInterval(() => {
   )
     load().catch(() => {});
 }, 5000);
+
+setInterval(() => {
+  if (
+    state &&
+    view === "radar" &&
+    state.settings.radarEnabled &&
+    !main.contains(document.activeElement)
+  )
+    load().catch(() => {});
+}, 10000);

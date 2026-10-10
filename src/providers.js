@@ -75,11 +75,31 @@ export const registry = (db, { key = process.env.FIRECRAWL_API_KEY } = {}) => {
     },
     {
       id: "history",
-      name: "External price history",
-      status: "not_configured",
-      capabilities: [],
-      requirements: ["Licensed variant-level historical source"],
-      note: "No all-time-low claims without validated provenance.",
+      name: "Public price collection & local history",
+      recentRequests:
+        db
+          ?.prepare(
+            "SELECT operation,occurred_at,outcome,credits_used FROM usage WHERE provider='public_http' ORDER BY id DESC LIMIT 10",
+          )
+          .all() || [],
+      status: db
+        ?.prepare(
+          "SELECT last_success_at FROM provider_health WHERE provider='public_http'",
+        )
+        .get()?.last_success_at
+        ? "operational"
+        : "ready_to_collect",
+      capabilities: [
+        "permitted_public_page_prices",
+        "persistent_history",
+        "matching_seller_comparison",
+      ],
+      requirements: [
+        "Approved exact retailer domains",
+        "Public structured product data",
+        "Robots permission",
+      ],
+      note: "Direct page reads spend no Firecrawl credits and need no history subscription. History starts when collection begins; no pre-existing external or all-time history is claimed.",
     },
   ];
 };

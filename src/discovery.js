@@ -8,7 +8,12 @@ import {
   finishRequest,
   activeProvider,
 } from "./provider-state.js";
+import { PublicPageReader } from "./public-pages.js";
+import { categories, planRadar } from "./radar.js";
+import { enqueueSearchPriceChecks, enqueueExtraction } from "./extraction.js";
+import { candidates } from "./evidence.js";
 import { runExtraction } from "./extraction.js";
+const categoryLabels = new Map(categories.map((c) => [c.id, c.label]));
 export const cacheKey = (normalized, settings) =>
   `${activeProvider}:v2:${settings.searchResultLimit}:${normalized}`;
 export const seeds = [
@@ -155,10 +160,14 @@ export function expand(result) {
   return variants.filter((x) => x.query.length > 4 && x.query.length <= 300);
 }
 export class Scheduler {
-  constructor(db, { provider = new FirecrawlDiscovery(), robotsCheck } = {}) {
+  constructor(db, options = {}) {
     this.db = db;
-    this.provider = provider;
-    this.robotsCheck = robotsCheck;
+    this.provider = options.provider || new FirecrawlDiscovery();
+    this.pageReader =
+      options.pageReader ||
+      (options.provider ? options.provider : new PublicPageReader());
+    this.robotsCheck =
+      options.robotsCheck || this.pageReader.robotsCheck?.bind(this.pageReader);
     this.active = null;
     this.timer = null;
     this.lastRequest = 0;
@@ -267,21 +276,25 @@ export class Scheduler {
     if (this.active) return;
     pruneCache(this.db);
     const settings = getSettings(this.db);
-    if (!requestAllowed(this.db) || !this.provider.key) return;
+    planRadar(this.db, enqueue);
     if (Date.now() - this.lastRequest < settings.intervalSeconds * 1000) return;
     const extraction = this.db
       .prepare(
         "SELECT * FROM extraction_jobs WHERE status IN ('queued','retry') AND run_at<=? ORDER BY id LIMIT 1",
       )
       .get(iso());
-    if (extraction) {
+    if (
+      extraction &&
+      requestAllowed(this.db, this.pageReader.id || "firecrawl") &&
+      this.pageReader.key
+    ) {
       this.active = {
         id: extraction.id,
         kind: "extraction",
         controller: new AbortController(),
       };
       this.lastRequest = Date.now();
-      this.inflight = runExtraction(this.db, extraction, this.provider, {
+      this.inflight = runExtraction(this.db, extraction, this.pageReader, {
         signal: this.active.controller.signal,
         robotsCheck: this.robotsCheck,
       });
@@ -291,11 +304,85 @@ export class Scheduler {
         this.active = null;
         this.inflight = null;
       }
+      const completed = this.db
+        .prepare(
+          "SELECT observation_id FROM extraction_jobs WHERE id=? AND status='done'",
+        )
+        .get(extraction.id);
+      if (completed && settings.radarEnabled) {
+        // Confirm a priority anomaly with a fresh read before it can notify.
+        // Two equal observations within 15 minutes stop further rechecks.
+        for (const candidate of candidates(this.db)
+          .filter(
+            (c) =>
+              settings.radarCategories.some(
+                (id) => categoryLabels.get(id) === c.category,
+              ) &&
+              !c.result.blocked &&
+              c.feedback !== "false_positive" &&
+              c.result.severity >= settings.severityThreshold &&
+              c.result.confidence >= settings.confidenceThreshold,
+          )
+          .slice(0, 3)) {
+          const current = this.db
+            .prepare("SELECT * FROM observations WHERE id=?")
+            .get(candidate.observation_id);
+          const matching = this.db
+            .prepare(
+              "SELECT COUNT(*) n FROM observations WHERE offer_id=? AND variant_id=? AND provider=? AND price_paise=? AND stock='in_stock' AND observed_at>=?",
+            )
+            .get(
+              current.offer_id,
+              current.variant_id,
+              current.provider,
+              current.price_paise,
+              new Date(Date.now() - 15 * 60000).toISOString(),
+            ).n;
+          if (matching < 2)
+            try {
+              enqueueExtraction(this.db, candidate.url, candidate.category, {
+                recheck: true,
+              });
+            } catch (e) {
+              if (e.code !== "QUEUE_FULL" && e.code !== "DOMAIN_NOT_APPROVED")
+                throw e;
+            }
+        }
+
+        const attrs = JSON.parse(
+          this.db
+            .prepare("SELECT attributes FROM observations WHERE id=?")
+            .get(completed.observation_id).attributes,
+        );
+        const phrase =
+          attrs.gtin ||
+          (attrs.listingScope
+            ? null
+            : `${attrs.brand} ${attrs.model} ${attrs.capacity === "unknown" ? "" : attrs.capacity}`);
+        if (phrase)
+          try {
+            enqueue(
+              this.db,
+              phrase + " India buy price",
+              extraction.category,
+              "comparison",
+            );
+          } catch (e) {
+            if (e.message !== "QUEUE_FULL") throw e;
+          }
+      }
       return;
     }
-    if (!settings.scanEnabled) return;
+    if (
+      (!settings.scanEnabled && !settings.radarEnabled) ||
+      !requestAllowed(this.db) ||
+      !this.provider.key
+    )
+      return;
     // Explicit monitoring recurs; broad seeds are opt-in from the UI.
-    for (const w of this.db.prepare("SELECT * FROM watchlist").all()) {
+    for (const w of settings.scanEnabled
+      ? this.db.prepare("SELECT * FROM watchlist").all()
+      : []) {
       try {
         enqueue(this.db, w.query, "Watchlist", "watchlist", "recheck");
       } catch (e) {
@@ -308,7 +395,19 @@ export class Scheduler {
         "SELECT j.*,q.query,q.normalized,q.category,q.family,q.runs,q.discoveries,q.useful,q.false_positives,q.last_run,(SELECT SUM(q2.runs) FROM queries q2 WHERE q2.category=q.category) category_runs,(SELECT MAX(o.price_paise*o.reliability) FROM search_results sr JOIN listings l ON l.url=sr.url JOIN offers sf ON sf.listing_id=l.id JOIN observations o ON o.offer_id=sf.id WHERE sr.query_id=q.id) expected_value_paise FROM jobs j JOIN queries q ON q.id=j.query_id WHERE j.status IN ('queued','retry') AND j.run_at<=?",
       )
       .all(iso());
-    if (!jobs.length) return;
+    const eligible = settings.scanEnabled
+      ? jobs
+      : jobs.filter(
+          (job) =>
+            settings.radarEnabled &&
+            settings.scrapeAllowedDomains.length &&
+            ["radar", "comparison", "observed_product"].includes(job.family) &&
+            settings.radarCategories.some(
+              (id) => categoryLabels.get(id) === job.category,
+            ),
+        );
+    if (!eligible.length) return;
+    jobs.splice(0, jobs.length, ...eligible);
     jobs.sort(
       (a, b) =>
         priority(b, { cost: settings.costPerSearch || 1 }) +
@@ -414,6 +513,24 @@ export class Scheduler {
         )
         .run(iso(), job.id);
       finishRequest(this.db, use, "success", credits);
+      if (["radar", "comparison", "observed_product"].includes(job.family))
+        enqueueSearchPriceChecks(this.db, job.query_id);
+      if (["radar", "comparison"].includes(job.family)) {
+        for (const r of results.slice(0, 2)) {
+          const q = expand(r).find((x) => x.family === "model") || expand(r)[0];
+          if (q && q.query.split(" ").length > 1)
+            try {
+              enqueue(
+                this.db,
+                q.query + " buy price India",
+                job.category,
+                "observed_product",
+              );
+            } catch (e) {
+              if (e.message !== "QUEUE_FULL") throw e;
+            }
+        }
+      }
       if (job.family === "seed" || job.family === "custom")
         for (const r of results.slice(0, 3))
           for (const x of expand(r))

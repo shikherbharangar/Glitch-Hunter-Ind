@@ -7,7 +7,7 @@ import { createApp, configuredOrigins } from "../src/server.js";
 import { manualInput } from "./fixtures.js";
 async function server(fn, options = {}) {
   const db = openDb(":memory:"),
-    { app } = createApp({ db, ...options }),
+    { app, scheduler } = createApp({ db, ...options }),
     s = app.listen(0, "127.0.0.1");
   await once(s, "listening");
   const base = `http://127.0.0.1:${s.address().port}`;
@@ -42,6 +42,7 @@ async function server(fn, options = {}) {
           if (body !== undefined) req.write(JSON.stringify(body));
           req.end();
         }),
+      { db, scheduler },
     );
   } finally {
     s.close();
@@ -278,3 +279,39 @@ test("Render URL alone configures hosting; origin values are normalized and vali
       /Invalid deployment origin/,
     );
 });
+
+test("radar API requires permitted sources, schedules chosen categories, exposes state and pauses", () =>
+  server(async (request, { db }) => {
+    const missing = await request("/api/radar", "POST", { radarEnabled: true });
+    assert.equal(missing.status, 400);
+    assert.equal(
+      (
+        await request("/api/radar", "POST", {
+          radarEnabled: true,
+          radarCategories: ["not-a-category"],
+          scrapeAllowedDomains: ["shop.example.com"],
+        })
+      ).status,
+      400,
+    );
+    const response = await request("/api/radar", "POST", {
+      radarEnabled: true,
+      radarCategories: ["computing"],
+      scrapeAllowedDomains: ["shop.example.com"],
+      radarMinPricePaise: 1000000,
+    });
+    assert.equal(response.status, 200);
+    const state = await (await request("/api/state")).json();
+    assert.equal(state.radar.enabled, true);
+    assert.deepEqual(state.radar.selected, ["computing"]);
+    assert.match(state.jobs[0].query, /mini PC/);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM usage").get().n, 0);
+    assert.equal(
+      (await request("/api/radar", "POST", { radarEnabled: false })).status,
+      200,
+    );
+    assert.equal(
+      db.prepare("SELECT status FROM jobs").get().status,
+      "cancelled",
+    );
+  }));

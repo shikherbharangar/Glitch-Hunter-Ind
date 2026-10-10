@@ -22,11 +22,51 @@ export function identity(left, right) {
     conflicts = [],
     missing = [];
   for (const k of critical) {
-    if (left[k] == null || right[k] == null) {
+    if (
+      left[k] == null ||
+      right[k] == null ||
+      normalize(left[k]) === "unknown" ||
+      normalize(right[k]) === "unknown" ||
+      (k === "packCount" && (!left[k] || !right[k]))
+    ) {
       missing.push(k);
       continue;
     }
     (normalize(left[k]) === normalize(right[k]) ? matches : conflicts).push(k);
+  }
+  if (
+    left.brand &&
+    right.brand &&
+    normalize(left.brand) !== normalize(right.brand)
+  )
+    conflicts.push("brand");
+  const scoped = left.listingScope && left.listingScope === right.listingScope;
+  const catalog = left.catalogScope && left.catalogScope === right.catalogScope;
+  if (
+    left.listingScope ||
+    right.listingScope ||
+    left.catalogScope ||
+    right.catalogScope
+  ) {
+    const confidence =
+      !conflicts.length &&
+      (scoped || catalog) &&
+      left.brand &&
+      right.brand &&
+      left.condition === right.condition &&
+      (left.condition === "new" || (scoped && left.condition === "unknown"))
+        ? catalog
+          ? 0.95
+          : 0.85
+        : 0;
+    return {
+      confidence,
+      matches,
+      conflicts,
+      missing,
+      blocked: confidence < 0.8,
+      scope: catalog ? "catalog_variant" : "same_listing_only",
+    };
   }
   const exact = ["model", "gtin", "sku"].some((k) => matches.includes(k));
   const required = ["model", "bundle", "condition", "kind", "packCount"];
@@ -47,7 +87,13 @@ export function identity(left, right) {
 export function variantKey(attrs, scope = "") {
   return createHash("sha256")
     .update(
-      JSON.stringify([scope, critical.map((k) => [k, normalize(attrs[k])])]),
+      JSON.stringify([
+        scope,
+        critical.map((k) => [k, normalize(attrs[k])]),
+        ...(attrs.listingScope || attrs.catalogScope
+          ? [attrs.listingScope || attrs.catalogScope]
+          : []),
+      ]),
     )
     .digest("hex");
 }

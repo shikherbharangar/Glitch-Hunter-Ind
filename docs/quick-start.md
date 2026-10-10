@@ -19,16 +19,18 @@ npm start
 
 Open the application on local port 3000 in your browser. It binds to your own computer’s loopback interface. Keep the terminal running. After frontend edits, run `npm run build` again. After credential changes, restart the server.
 
-In Settings, choose a request budget before enabling scans. A conservative starting policy is 10 attempted requests per day, at least 60 seconds between requests, five results per search and a 360-minute cache. Monetary cost remains unknown until you enter the account’s actual prices; reported credits appear in System health. The shared budget includes failed search and extraction attempts.
+In Settings, choose a request budget before enabling scans. A conservative starting policy is 10 attempted requests per day, at least 60 seconds between requests, five results per search and a 360-minute cache. Monetary cost remains unknown until you enter the account’s actual prices; reported credits appear in System health. Firecrawl spend includes failed discovery attempts. Direct public-page price reads have a separate daily collection limit.
 
 ## First session
 
-1. Open **Results**. Queue a category or exact product model, or use **Queue starter categories** for broad coverage. Leads appear here as searches finish. Scheduled scanning must be enabled in Settings.
-2. Use **Watchlist** to monitor a query after cache expiry. Watchlists consume the same daily budget. Pause scans in Settings whenever needed.
-3. To record a real price yourself, open **Price evidence** and provide the full INR price in paise, exact variant, seller, availability, source and time. Manual input does not create trusted history or verified checkout.
-4. For page extraction, review the source website’s terms and approve its exact domain in Settings. In Discover, enter the exact URL and category, then queue extraction. Readable robots permission and complete, unambiguous product/offer data are required. Many pages will remain explicitly unverified.
-5. Choose **Request fresh page** for a recheck. It respects budget and permission controls. A Firecrawl alert requires a second fresh matching same-offer price observation, the existing VIGIL integrity/score gates, and a configured delivery channel.
-6. Inspect **System health** for actual outcomes, request usage and credits. A listing lead is not a confirmed pricing error. Sparse evidence may produce no priority candidates; no examples or histories are seeded.
+1. Open **Category radar** (`/#radar`). Choose tech/high-value categories and enter exact domains of retailers that permit public product-page reads. Press **Start category radar**. You do not need to type an individual query.
+2. Products and price assessments appear automatically. The default focus is standard prices above ₹10,000, with controls to change that floor and the scan/history intervals. The history collector starts recording prices now; past prices are not fabricated.
+3. Read the observed price, historical standard, matching seller standard, history counts and anomaly/evidence scores on each card. Possible glitches remain candidates until you confirm checkout yourself. Missing or blocked prices have an explicit status.
+4. **Search products** remains available for one-off searches. Permitted price checks use public-page reads by default, not a paid Firecrawl scrape. You can manually request a fresh check from a result.
+5. **Watchlist** and advanced evidence entry remain available. Manual input stays unvalidated. Automatic alerts need configured delivery, explicit opt-in and two matching fresh same-offer prices.
+6. Use **Pause radar** to stop autonomous discovery and recurring tracking. Already queued page checks can finish. Inspect **Scan activity** or **System health** for actual outcomes.
+
+See [Radar and history](radar.md) for collection budgets, source requirements and cold-start limits.
 
 ## Keep your data
 

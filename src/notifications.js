@@ -68,9 +68,9 @@ export async function notifyCandidate(db, c, { senders } = {}) {
     c.feedback === "false_positive"
   )
     return [];
-  // A successful page fetch is not a checkout check. Firecrawl alerts need a
+  // A successful page fetch is not a checkout check. Automated page-price alerts need a
   // second matching, fresh observation of the same offer and exact variant.
-  if (c.provider === "firecrawl") {
+  if (["firecrawl", "public_http"].includes(c.provider)) {
     const current = db
       .prepare("SELECT * FROM observations WHERE id=?")
       .get(c.observation_id);
@@ -82,11 +82,12 @@ export async function notifyCandidate(db, c, { senders } = {}) {
       current.observed_at < cutoff ||
       !db
         .prepare(
-          "SELECT 1 FROM observations WHERE offer_id=? AND variant_id=? AND provider='firecrawl' AND price_paise=? AND stock='in_stock' AND purchase_status='PRODUCT_PAGE_OBSERVED' AND observed_at>=? AND observed_at<? AND id<>? LIMIT 1",
+          "SELECT 1 FROM observations WHERE offer_id=? AND variant_id=? AND provider=? AND price_paise=? AND stock='in_stock' AND purchase_status='PRODUCT_PAGE_OBSERVED' AND observed_at>=? AND observed_at<? AND id<>? LIMIT 1",
         )
         .get(
           current.offer_id,
           current.variant_id,
+          c.provider,
           current.price_paise,
           cutoff,
           current.observed_at,

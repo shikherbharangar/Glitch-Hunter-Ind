@@ -2,7 +2,7 @@
 
 A local price-evidence workstation for Amazon India, Flipkart and other permitted public sources. It separates unusual pricing from trustworthy evidence and purchase verification. Built from an empty repository; no example deals are seeded into the application.
 
-**Status:** the local application, database, VIGIL model, API and interface run. One authenticated Firecrawl search succeeded on 9 October 2026 after environment publication (two leads, two provider-reported credits). The current cloud instance has bounded scanning enabled (10 requests/day); fresh installations start with scans and alerts off. Amazon/Flipkart product APIs and external historical data are unavailable pending current documentation and account access. The full live-discovery definition of done is not yet satisfied.
+**Status:** category radar, persistent public-page history collection, VIGIL 0.2 robust anomaly ranking, matching-seller comparisons and manual search are implemented. The radar searches selected tech categories on a schedule; no individual query is required. Direct price collection needs no Keepa subscription and spends no Firecrawl credits, while discovery still uses Firecrawl. There is no seeded deal/history data or claim of calibrated real-world accuracy. See [Category radar setup](docs/radar.md) and [model mathematics](docs/vigil.md).
 
 ## Run
 
@@ -53,9 +53,10 @@ Visual QA requires Chromium at `/usr/bin/chromium`, or set `CHROMIUM_PATH`. It u
 | `src/db.js`, `migrations/`                                  | Versioned SQLite migration, WAL persistence, policy settings                                |
 | `src/providers.js`                                          | Firecrawl v2 search/scrape HTTP adapter and explicit unavailable marketplace boundaries     |
 | `src/extraction.js`, `src/urls.js`, `src/provider-state.js` | Permitted structured extraction, source normalization, health and shared request accounting |
-| `src/discovery.js`                                          | Adaptive bounded queue, expansion, inferred categories, caches, retry, quota and recovery   |
+| `src/discovery.js`, `src/radar.js`                          | Adaptive bounded queue, expansion, inferred categories, caches, retry, quota and recovery   |
+| `src/public-pages.js`                                       | Free direct public HTML reads, DNS/address checks, response limits                          |
 | `src/identity.js`, `src/evidence.js`                        | Price parsing, exact identity, product/variant/listing/offer records, provenance and review |
-| `src/vigil.js`                                              | Reproducible severity/confidence/value/purchase-state calculations                          |
+| `src/vigil.js`, `src/robust-model.js`                       | Reproducible severity/confidence/value/purchase-state calculations                          |
 | `src/notifications.js`                                      | Opt-in Telegram/SMTP delivery, eligibility, cooldown and deduplication                      |
 | `public/`                                                   | Seven data-connected views; local Paper Mono and its OFL licence                            |
 | `scripts/`                                                  | Build, synthetic evaluation and browser QA                                                  |
@@ -64,7 +65,7 @@ Visual QA requires Chromium at `/usr/bin/chromium`, or set `CHROMIUM_PATH`. It u
 | `docs/vigil.md`                                             | Formulas, parameter ranges, integrity gates, scientific limitations                         |
 | `docs/delivery.md`                                          | Verified outcomes, remaining access and unfinished capabilities                             |
 
-The Firecrawl migration updates the existing application in place. VIGIL formulas, identity comparisons, CSS and font assets are preserved. See [migration report](docs/firecrawl-migration.md). Generated dependencies, database, production assets, logs and screenshots are ignored.
+The category radar extends VIGIL to robust trend and change diagnostics, adds persistent public-page tracking and conservative identity scopes, and keeps the local Paper Mono font assets. The earlier [Firecrawl migration report](docs/firecrawl-migration.md) documents the discovery adapter. Generated dependencies, database, production assets, logs and screenshots are ignored.
 
 ## Persistence and API
 
@@ -102,3 +103,5 @@ Outbound delivery was not attempted. Sent alerts carry source and baseline prove
 The only selected font is **Paper Mono**, locally served from the official Paper.design repository, unmodified under SIL OFL 1.1. Its variable axis supports weights 100–800. See `public/fonts/OFL.txt` and the research ledger for source commit/hash. Generic monospace is only a fallback; a failed font request produces a visible warning.
 
 No decorative product images, invented histories, hardcoded deals, claimed verified checkout, or claims of complete marketplace coverage are included. VIGIL is a provisional ranking model, not a calibrated probability of seller error. Potential savings exclude unknown fulfilment, delivery and cancellation outcomes.
+
+Radar controls use `POST /api/radar`; the UI handles category/source validation and start/pause. `GET /api/state` includes the category feed and its price-history/comparison assessments. No new credential is required for direct collection.

@@ -1,3 +1,4 @@
+import { categories, planRadar, radarState } from "./radar.js";
 import { assessListing } from "./assessment.js";
 import { enqueueSearchPriceChecks } from "./extraction.js";
 import express from "express";
@@ -36,6 +37,16 @@ const settingsSchema = z
       .max(30),
     costPerScrape: z.number().min(0).max(100).nullable(),
     alertsEnabled: z.boolean(),
+    radarEnabled: z.boolean(),
+    radarCategories: z
+      .array(z.enum(categories.map((c) => c.id)))
+      .min(1)
+      .max(categories.length),
+    radarCycleMinutes: z.number().int().min(30).max(10080),
+    historyIntervalMinutes: z.number().int().min(30).max(10080),
+    historyDailyBudget: z.number().int().min(1).max(1000),
+    radarMinPricePaise: z.number().int().min(0).max(1e10),
+    maxTrackedProducts: z.number().int().min(1).max(500),
     costPerSearch: z.number().min(0).max(100).nullable(),
     weights: z
       .object({
@@ -187,6 +198,7 @@ export function createApp({
         .all(),
     };
     res.json({
+      radar: radarState(db, assessmentContext.candidates),
       settings: assessmentContext.settings,
       providers: registry(db, { key: scheduler.provider.key }),
       notifications: notificationStatus(),
@@ -314,6 +326,44 @@ export function createApp({
       d.current.id,
     );
     res.json(detail(db, d.id));
+  });
+  app.post("/api/radar", (req, res) => {
+    const update = settingsSchema
+      .pick({
+        radarEnabled: true,
+        radarCategories: true,
+        radarMinPricePaise: true,
+        scrapeAllowedDomains: true,
+        radarCycleMinutes: true,
+        historyIntervalMinutes: true,
+        historyDailyBudget: true,
+      })
+      .parse(req.body);
+    const settings = getSettings(db);
+    if (
+      update.radarEnabled &&
+      !(update.scrapeAllowedDomains || settings.scrapeAllowedDomains).length
+    )
+      return res
+        .status(400)
+        .json({
+          error:
+            "Add at least one permitted website domain for product price checks.",
+        });
+    setSettings(db, update);
+    if (update.radarEnabled) {
+      // Run a bounded discovery round now, then repeat on the configured cycle.
+      db.prepare("DELETE FROM radar_cycles").run();
+      planRadar(db, enqueue);
+    } else if (update.radarEnabled === false) {
+      for (const job of db
+        .prepare(
+          "SELECT j.id FROM jobs j JOIN queries q ON q.id=j.query_id WHERE q.family IN ('radar','comparison','observed_product') AND j.status IN ('queued','retry','running')",
+        )
+        .all())
+        scheduler.cancel(job.id);
+    }
+    res.json(radarState(db, candidates(db)));
   });
   app.post("/api/search", async (req, res) => {
     const d = querySchema.parse(req.body);

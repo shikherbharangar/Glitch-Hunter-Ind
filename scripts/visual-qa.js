@@ -44,7 +44,7 @@ try {
         });
     });
     await page.goto(origin + "/#radar");
-    await page.getByRole("heading", { name: "Price radar." }).waitFor();
+    await page.getByRole("heading", { name: "Category radar." }).waitFor();
     await page.evaluate(() => document.fonts.ready);
     await page.keyboard.press("Tab");
     assert.equal(
@@ -291,7 +291,7 @@ try {
       data.coverage.listings = 1;
       await route.fulfill({ response: upstream, json: data });
     });
-    await resultsPage.goto(origin);
+    await resultsPage.goto(origin + "/#discover");
     await resultsPage
       .getByRole("heading", { name: "Search results.", exact: true })
       .waitFor();
@@ -331,6 +331,93 @@ try {
     deduplicated: true,
     viewports: 2,
     fixture: "SYNTHETIC mocked search leads",
+  });
+  for (const width of [1440, 390]) {
+    const radarPage = await browser.newPage({
+      viewport: { width, height: 900 },
+    });
+    radarPage.on("pageerror", (e) => errors.push(e.message));
+    await radarPage.goto(origin);
+    await radarPage
+      .getByRole("heading", { name: "Category radar.", exact: true })
+      .waitFor();
+    await radarPage
+      .locator('#radar-form [name="domains"]')
+      .fill("shop.example.com");
+    for (const box of await radarPage
+      .locator('#radar-form [name="categories"]')
+      .all())
+      await box.setChecked((await box.getAttribute("value")) === "computing");
+    await radarPage
+      .getByRole("button", { name: "Start category radar", exact: true })
+      .click();
+    await radarPage
+      .getByText("Finding products in your categories…", { exact: true })
+      .waitFor();
+    const started = await radarPage.evaluate(async () =>
+      (await fetch("/api/state")).json(),
+    );
+    assert.deepEqual(started.radar.selected, ["computing"]);
+    assert.equal(started.radar.enabled, true);
+    await radarPage.locator("#radar-setup > summary").click();
+    await radarPage
+      .getByRole("button", { name: "Pause radar", exact: true })
+      .click();
+    await radarPage
+      .getByRole("button", { name: "Start category radar", exact: true })
+      .waitFor();
+    await radarPage.route("**/api/state", async (route) => {
+      const upstream = await route.fetch(),
+        data = await upstream.json();
+      data.settings.radarEnabled = true;
+      data.radar.products = [
+        {
+          url: "https://shop.example.com/gpu",
+          title: "SYNTHETIC QA GPU",
+          category: "Computers & components",
+          historyPoints: 30,
+          history: { typicalPaise: 2999900 },
+          marketPricePaise: 3000000,
+          dropFraction: 0.83,
+          assessment: {
+            status: "possible_glitch",
+            label: "Possible price glitch",
+            message: "Synthetic supported anomaly for browser validation only.",
+            pricePaise: 499900,
+            referencePaise: 2999900,
+            severity: 90,
+            confidence: 80,
+          },
+        },
+      ];
+      await route.fulfill({ response: upstream, json: data });
+    });
+    await radarPage.reload();
+    await radarPage
+      .getByRole("heading", { name: "SYNTHETIC QA GPU", exact: true })
+      .waitFor();
+    await radarPage
+      .getByText("Possible price glitch", { exact: true })
+      .waitFor();
+    assert.equal(
+      await radarPage.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+      false,
+    );
+    await radarPage.screenshot({
+      path: `artifacts/${width}-category-radar.png`,
+      fullPage: true,
+    });
+    await radarPage.close();
+  }
+  checks.push({
+    categoryRadar: true,
+    startPause: true,
+    automaticCategorySelection: true,
+    priceComparisonCards: true,
+    viewports: 2,
+    fixture: "SYNTHETIC isolated app and mocked card",
   });
   for (const status of [
     "credentials_missing",

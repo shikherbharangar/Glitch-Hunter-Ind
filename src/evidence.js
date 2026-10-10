@@ -14,9 +14,11 @@ export const attributesSchema = z
     capacity: text.optional(),
     colour: text.optional(),
     generation: text.optional(),
-    condition: z.enum(["new", "used", "refurbished"]),
+    condition: z.enum(["new", "used", "refurbished", "unknown"]),
     kind: text,
-    packCount: z.number().int().min(1).max(1000),
+    packCount: z.number().int().min(0).max(1000),
+    listingScope: text.optional(),
+    catalogScope: text.optional(),
   })
   .strict();
 export const observationSchema = z
@@ -66,10 +68,12 @@ export function ingest(
     attrs = d.attributes;
   db.exec("BEGIN IMMEDIATE");
   try {
-    const productKey = variantKey(
-      { model: attrs.model, gtin: attrs.gtin, sku: attrs.sku },
-      normalize(attrs.brand || url.marketplace),
-    );
+    const productKey = attrs.catalogScope
+      ? variantKey({ gtin: attrs.gtin }, normalize(attrs.brand))
+      : variantKey(
+          { model: attrs.model, gtin: attrs.gtin, sku: attrs.sku },
+          normalize(attrs.brand || url.marketplace),
+        );
     db.prepare(
       "INSERT INTO products(identity_key,title,brand,model,category) VALUES(?,?,?,?,?) ON CONFLICT(identity_key) DO NOTHING",
     ).run(productKey, d.title, attrs.brand || null, attrs.model, d.category);
@@ -78,14 +82,20 @@ export function ingest(
       .get(productKey);
     // Conservative: unknown configurations are never merged across listings.
     const complete =
+      !attrs.listingScope &&
       attrs.brand &&
       ["capacity", "colour", "generation"].every((k) => attrs[k]);
-    const key = variantKey(
-      attrs,
-      complete
-        ? String(product.id)
-        : `${product.id}:${url.marketplace}:${url.id}`,
-    );
+    const key = attrs.catalogScope
+      ? variantKey(
+          { gtin: attrs.gtin, condition: attrs.condition },
+          `${product.id}:${attrs.catalogScope}`,
+        )
+      : variantKey(
+          attrs,
+          complete
+            ? String(product.id)
+            : `${product.id}:${url.marketplace}:${url.id}`,
+        );
     db.prepare(
       "INSERT INTO variants(product_id,variant_key,attributes) VALUES(?,?,?) ON CONFLICT(variant_key) DO NOTHING",
     ).run(product.id, key, JSON.stringify(attrs));
